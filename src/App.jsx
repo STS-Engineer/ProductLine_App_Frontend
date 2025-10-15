@@ -532,7 +532,7 @@ const LoginScreen = ({ setAuthToken, setUserData, setIsLoading, isLoading }) => 
             <div className="w-full max-w-md bg-white rounded-xl shadow-2xl p-8 space-y-6">
                 <h1 className="text-3xl font-bold text-center text-indigo-700 flex items-center justify-center">
                     <Database className="w-8 h-8 mr-2 text-indigo-500" />
-                    {isSigningUp ? 'Create Account' : 'RFQ Data'}
+                    {isSigningUp ? 'Create Account' : 'Product and Productline Data'}
                 </h1>
                 
                 {error && (
@@ -1199,7 +1199,7 @@ const fetchData = useCallback(async (isUserAction = false) => {
                 {/* 2. Main Title */}
                 <h1 className="text-2xl font-extrabold text-indigo-400 flex items-center">
                     {/* Database icon is now slightly separated or removed, following the HTML header style */}
-                    RFQ StreamLine
+                    Product and Productline StreamLine
                 </h1>
             </div>
 
@@ -1612,7 +1612,7 @@ const fetchData = useCallback(async (isUserAction = false) => {
 
                 {/* Signature Line/Version */}
                 <p className="text-xs">
-                    © {new Date().getFullYear()} RFQ StreamLine. All rights reserved. | Version 1.2
+                    © {new Date().getFullYear()} Product and Productline StreamLine. All rights reserved. | Version 1.2
                 </p>
             </div>
         </footer>
