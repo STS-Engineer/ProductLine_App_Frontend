@@ -1594,7 +1594,7 @@ const fetchData = useCallback(async (isUserAction = false) => {
     
     // --- NEW: Signature and Branding Footer Component ---
     const renderSignature = () => (
-        <footer className="bg-gray-800 text-gray-400 py-4 mt-10 shadow-inner">
+        <footer className="bg-gray-800 text-gray-400 py-4 mt-auto shadow-inner">
             <div className="max-w-7xl mx-auto flex justify-between items-center px-4 sm:px-8">
                 {/* Company Logo/Picture - FIX: Using the secondary logo with h-8 (standard footer height) */}
                 <div className="flex items-center space-x-3">
@@ -1630,10 +1630,10 @@ const fetchData = useCallback(async (isUserAction = false) => {
     }
 
     return (
-        <div className="min-h-screen bg-gray-100 font-sans">
+        <div className="min-h-screen bg-gray-100 font-sans flex flex-col">
             {renderHeader()}
             
-            <main className="p-4 sm:p-8 max-w-7xl mx-auto">
+            <main className="p-4 sm:p-8 max-w-7xl mx-auto flex-grow w-full">
                 
                 {/* Collection Selector Tabs */}
                 <div className="flex space-x-2 border-b border-gray-300 mb-6">
