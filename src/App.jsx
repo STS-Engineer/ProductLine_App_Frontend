@@ -1199,7 +1199,7 @@ const fetchData = useCallback(async (isUserAction = false) => {
                 {/* 2. Main Title */}
                 <h1 className="text-2xl font-extrabold text-indigo-400 flex items-center">
                     {/* Database icon is now slightly separated or removed, following the HTML header style */}
-                    Product and Productline StreamLine
+                    Products and Product Lines StreamLine
                 </h1>
             </div>
 
@@ -1606,7 +1606,7 @@ const fetchData = useCallback(async (isUserAction = false) => {
                         title="AVOCARBON"
                     />
                     <span className="text-sm font-light hidden sm:inline">
-                        — Built for StreamLine Operations
+                        — Built by AVOCarbon AI Team
                     </span>
                 </div>
 
