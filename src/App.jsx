@@ -632,7 +632,7 @@ const LoginScreen = ({ setAuthToken, setUserData, setIsLoading, isLoading }) => 
                 <form onSubmit={isSigningUp ? handleSignup : handleLogin} className="space-y-4">
                     {isSigningUp && (
                         <div className="relative">
-                            <User className="w-5 h-5 text-gray-400 absolute left-3 top-1/2 transform -translate-y-1/2" />
+                            <User className="w-5 h-5 text-gray-400 absolute left-3 top-1/3 transform -translate-y-1/2" />
                             <input
                                 type="text"
                                 placeholder="Display Name (Auto-Generated)"
@@ -642,7 +642,7 @@ const LoginScreen = ({ setAuthToken, setUserData, setIsLoading, isLoading }) => 
                                 disabled={isLoading}
                                 // MODIFICATION: Always apply grey style when signing up
                                 className="w-full p-3 pl-10 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 bg-gray-200 text-gray-500"
-                                readOnly={false} 
+                                readOnly={true} 
                             />
                             <p className="text-xs text-gray-500 mt-1 pl-10">
                                 {derivedDisplayName 
