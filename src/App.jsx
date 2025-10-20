@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { LogOut, Plus, Trash2, Save, X, Clock, Filter, Database, User, Mail, Zap, Loader, ChevronDown, Eye, Shield, FileText } from 'lucide-react'; 
 import Swal from "sweetalert2"; 
 import logoAvocarbon from './assets/logo-avocarbon.png';
 
 // IMPORTANT: Update this to your deployed API server URL when moving off localhost
-const BASE_API_URL = 'https://product-db-back.azurewebsites.net';
+const BASE_API_URL = 'http://localhost:3001';
 
 // List of columns managed by the server/database that should NOT be shown in forms or tables
 const EXCLUDED_INTERNAL_COLUMNS = ['created_at', 'created_by', 'updated_at', 'updated_by', 'password_hash', 'product_line_id'];
@@ -16,12 +16,9 @@ const initialCollections = {
         name: 'Product Lines',
         apiPath: '/api/product_lines',
         filterableFields: ['name', 'product_line_manager'],
-        // CRITICAL: attachments_raw is now a file path URL
         fields: ['id', 'name', 'type_of_products', 'manufacturing_locations', 'design_center', 'product_line_manager', 'history', 'type_of_customers', 'metiers', 'strength', 'weakness', 'perspectives', 'compliance_resource_id', 'attachments_raw', ...EXCLUDED_INTERNAL_COLUMNS],
-        // Columns to show in the compact main table view (Removed capacity, gmdc_pct)
         compactFields: [ 'name', 'product_line_manager'],
         requiredFields: ['name', 'product_line_manager' ],
-        // CHANGE 1A: Initialize file field to an empty ARRAY
         defaultValues: { name: '', type_of_products: '', product_line_manager: '', strength: '', weakness: '', attachments_raw: [] }, 
         placeholder: { name: 'Engine Line X', type_of_products: 'Automotive', product_line_manager: 'Jane Doe' },
     },
@@ -29,20 +26,43 @@ const initialCollections = {
         name: 'Products',
         apiPath: '/api/products',
         filterableFields: ['product_name', 'product_line'],
-        // CRITICAL: product_pictures is now a file path URL
         fields: ['id', 'product_name', 'product_line', 'description', 'product_definition', 'operating_environment', 'technical_parameters', 'machines_and_tooling', 'manufacturing_strategy', 'purchasing_strategy', 'prototypes_ppap_and_sop', 'engineering_and_testing', 'capacity', 'our_advantages', 'gmdc_pct', 'product_line_id', 'customers_in_production', 'customer_in_development', 'level_of_interest_and_why', 'estimated_price_per_product', 'prod_if_customer_in_china', 'costing_data', 'product_pictures', ...EXCLUDED_INTERNAL_COLUMNS],
-        // Columns to show in the compact main table view
         compactFields: [ 'product_name', 'product_line'],
         requiredFields: ['product_name', 'product_line'],
-        // CHANGE 1B: Initialize file field to an empty ARRAY
         defaultValues: { product_name: '', product_line: '', description: '', capacity: '', gmdc_pct: 0.00, product_pictures: [] }, 
         placeholder: { product_name: 'Sensor A1', product_line: 'Engine Line X', capacity: 'Unlimited/on demand...', gmdc_pct: 35.50 },
     },
+    // MOCK user collection for display/role purposes
+    users: {
+        name: 'Users',
+        apiPath: '/api/users',
+        filterableFields: ['email', 'displayName', 'user_role'],
+        fields: ['id', 'email', 'displayName', 'user_role', ...EXCLUDED_INTERNAL_COLUMNS],
+        compactFields: ['displayName', 'email', 'user_role'],
+        requiredFields: ['email', 'password', 'displayName'],
+        defaultValues: { email: '', displayName: '', user_role: 'user' },
+        placeholder: { email: 'name.lastname@avocarbon.com', displayName: 'Firstname Lastname' },
+    },
 };
 
-const collectionKeys = Object.keys(initialCollections);
+const collectionKeys = Object.keys(initialCollections).filter(k => k !== 'users'); // Exclude users from main tabs
 const LOGS_API_PATH = '/api/audit_logs';
 
+// Initial column widths for resizing (used to initialize state)
+const initialCompactFields = initialCollections.product_lines.compactFields.concat(initialCollections.products.compactFields).filter((v, i, a) => a.indexOf(v) === i);
+const initialColumnWidths = initialCompactFields.reduce((acc, field) => {
+    acc[field] = 200; // Default width in pixels
+    return acc;
+}, { 
+    'id': 100, 
+    'Details': 120,
+    // NEW: Default widths for audit log table columns
+    'Action': 80,
+    'User': 150,
+    'Table': 150,
+    'Record ID': 100,
+    'Timestamp': 220,
+}); 
 
 // --- Utility Functions ---
 
@@ -66,11 +86,78 @@ const getFieldType = (field) => {
     return 'text';
 };
 
-// --- MODAL COMPONENT ---
+// --- HELPER COMPONENT: RESIZABLE TABLE HEADER (UNCHANGED, BUT REUSED) ---
+const ResizableTableHeader = ({ columns, columnWidths, setColumnWidths, actionColumnTitle = 'Details' }) => {
+    const startResizing = useCallback((e, colKey) => {
+        e.preventDefault();
+        const startX = e.clientX;
+        const currentWidth = columnWidths[colKey] || 200;
+        
+        const mouseMoveHandler = (moveEvent) => {
+            const widthChange = moveEvent.clientX - startX;
+            // Limit minimum column width to prevent collapse
+            const newWidth = Math.max(50, currentWidth + widthChange); 
+            
+            setColumnWidths(prev => ({ 
+                ...prev, 
+                [colKey]: newWidth 
+            }));
+        };
+
+        const mouseUpHandler = () => {
+            document.removeEventListener('mousemove', mouseMoveHandler);
+            document.removeEventListener('mouseup', mouseUpHandler);
+        };
+
+        document.addEventListener('mousemove', mouseMoveHandler);
+        document.addEventListener('mouseup', mouseUpHandler);
+    }, [columnWidths, setColumnWidths]);
+    
+    // Convert column keys to display names
+    const displayColumns = columns.map(field => ({
+        key: field,
+        title: field.toUpperCase().replace(/_/g, ' ')
+    }));
+    
+    // Special handling for Audit Logs which use static titles that match the keys in initialColumnWidths
+    const isAuditLogHeader = columns.some(c => ['Action', 'User', 'Table', 'Record ID', 'Timestamp'].includes(c));
+    
+    return (
+        <thead className="bg-gray-50">
+            <tr>
+                {displayColumns.map(({ key, title }) => (
+                    <th 
+                        key={key} 
+                        // Use key directly for width lookups
+                        style={{ width: columnWidths[key] || 'auto', minWidth: 50 }}
+                        className="relative px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider group"
+                    >
+                        <div className="flex items-center justify-between h-full">
+                            {title}
+                            
+                            {/* Resizer Handle */}
+                            <div
+                                className="absolute top-0 right-0 w-2 h-full cursor-col-resize opacity-0 group-hover:opacity-100 bg-gray-300 hover:bg-indigo-500 transition-opacity"
+                                onMouseDown={(e) => startResizing(e, key)}
+                                title="Drag to resize column"
+                            />
+                        </div>
+                    </th>
+                ))}
+                {/* Fixed Action/Details column only for data tables */}
+                {!isAuditLogHeader && (
+                    <th style={{ width: 120, minWidth: 120 }} className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        {actionColumnTitle}
+                    </th>
+                )}
+            </tr>
+        </thead>
+    );
+};
+
+// --- MODAL COMPONENT (UNCHANGED) ---
 
 const DetailModal = ({ isOpen, onClose, item, activeCollection, allProductLines, handleUpdate, isLoading, setApiError }) => {
-    // CRITICAL: We need to ensure that item's file fields (which are strings/paths) are treated correctly.
-    // When an input selects a file, we store the File object. Otherwise, it's the path string.
     const [formData, setFormData] = useState(item);
     const [expandedFields, setExpandedFields] = useState({});
 
@@ -95,28 +182,19 @@ const DetailModal = ({ isOpen, onClose, item, activeCollection, allProductLines,
         setFormData(prev => ({ ...prev, [field]: finalValue }));
     };
     
-    // CHANGE 2B: CRITICAL CHANGE: Stores the native File object OR array of File objects in state.
     const handleFileChange = (field, fileOrFiles) => {
-        // If fileOrFiles is an array of File objects (new selection) or an array of paths (current data)
         if (Array.isArray(fileOrFiles)) {
-            // We combine new files with existing file paths
             const existingPaths = formData[field].filter(f => typeof f === 'string' && f.startsWith('uploads/'));
-            // New selection REPLACES old selection, retaining only existing paths
             const newFiles = fileOrFiles.filter(f => f instanceof File); 
             
-            // NOTE: This logic assumes you are only ADDING new files, not replacing existing paths.
-            // For a simpler implementation (which matches the request): New files replace old files, and we keep paths.
-            // Since the requested change only involves making the input multiple, let's simplify to: 
-            // the new selection is an array of File objects, and it replaces all previous File objects.
             setFormData(prev => ({ 
                 ...prev, 
                 [field]: [
                     ...existingPaths, // Keep existing paths
-                    ...newFiles       // Add new file objects
+                    ...newFiles      // Add new file objects
                 ]
             }));
         } else {
-             // Handle single file field or clearing (setting to empty array)
              setFormData(prev => ({ ...prev, [field]: [] }));
         }
     };
@@ -124,11 +202,8 @@ const DetailModal = ({ isOpen, onClose, item, activeCollection, allProductLines,
     const handleSubmit = (e) => {
         e.preventDefault();
         
-        // Validation Check (NOTE: File fields are optional unless specifically listed in requiredFields)
         const requiredCheck = activeCollection.requiredFields.every(field => {
             const value = formData[field];
-            // Check for presence and ensure File objects are not erroneously validated as false
-            // File fields are now arrays, check if the array has content (paths or files)
             if (getFieldType(field).includes('file')) {
                  return activeCollection.requiredFields.includes(field) ? Array.isArray(value) && value.length > 0 : true;
             }
@@ -143,7 +218,6 @@ const DetailModal = ({ isOpen, onClose, item, activeCollection, allProductLines,
             return;
         }
 
-        // Call the main update handler passed from App
         handleUpdate(formData.id, formData);
     };
 
@@ -180,7 +254,6 @@ const DetailModal = ({ isOpen, onClose, item, activeCollection, allProductLines,
         }
 
         if (isLongText) {
-             // Textarea with expansion logic
              const rowCount = isExpanded ? 6 : 2;
              const canExpand = String(currentValue).length > CHARACTER_EXPANSION_THRESHOLD;
              return (
@@ -211,7 +284,6 @@ const DetailModal = ({ isOpen, onClose, item, activeCollection, allProductLines,
             const isImage = type === 'file_image';
             const fileDataArray = Array.isArray(formData[field]) ? formData[field] : []; // Now always an array
             
-            // Separate files that are already on the server (paths) from newly selected File objects
             const existingPaths = fileDataArray.filter(f => typeof f === 'string' && f.startsWith('uploads/'));
             const newFiles = fileDataArray.filter(f => f instanceof File);
 
@@ -220,19 +292,15 @@ const DetailModal = ({ isOpen, onClose, item, activeCollection, allProductLines,
             const hasData = hasExistingPaths || hasNewFiles;
 
             
-            // CHANGE 2A: Handle file selection for MULTIPLE files
             const handleFileSelect = (e) => {
-                const files = Array.from(e.target.files); // Get all selected files
-                handleFileChange(field, files); // Pass the array of File objects
-                // Clear the input value to allow re-selection of the same files
+                const files = Array.from(e.target.files); 
+                handleFileChange(field, files); 
                 e.target.value = null; 
             };
             
-            // Function to view an individual file (only works for existing paths)
             const handleView = (fileUrl, fileName) => {
-                const rawFileUrl = `${BASE_API_URL}/${fileUrl}`; // Construct the full URL
+                const rawFileUrl = `${BASE_API_URL}/${fileUrl}`; 
                 
-                // CRITICAL FIX: Determine file type for conditional viewing method
                 const isCommonImage = isImage && (fileName.toLowerCase().match(/\.(jpg|jpeg|png|gif|webp)$/) !== null);
                 
                 const isOfficeFile = fileName.toLowerCase().match(/\.(docx|xlsx|pptx|doc|xls|ppt)$/) !== null;
@@ -241,14 +309,12 @@ const DetailModal = ({ isOpen, onClose, item, activeCollection, allProductLines,
                 let viewerNote = 'If the file doesn\'t display above, your browser may not support direct viewing of this file type.';
                 
                 if (isOfficeFile) {
-                    // Use Google Docs Viewer for unsupported Office formats (requires public URL access)
                     viewerUrl = `https://docs.google.com/gview?url=${encodeURIComponent(rawFileUrl)}&embedded=true`;
                     viewerNote = 'Microsoft Office files are being displayed via Google Docs Viewer. This requires your backend server to be publicly accessible.';
                 }
 
 
                 if (isCommonImage) {
-                    // 1. IMAGE DISPLAY (Existing logic for direct image URL)
                     Swal.fire({
                         title: `${label} Preview: ${fileName}`,
                         imageUrl: rawFileUrl,
@@ -264,7 +330,6 @@ const DetailModal = ({ isOpen, onClose, item, activeCollection, allProductLines,
                         }
                     });
                 } else {
-                    // 2. DOCUMENT/GENERAL ATTACHMENT DISPLAY (Using Iframe)
                     Swal.fire({
                         title: `${label} Review: ${fileName}`,
                         html: `
@@ -281,7 +346,7 @@ const DetailModal = ({ isOpen, onClose, item, activeCollection, allProductLines,
                                 ${viewerNote} You can right-click the file in the viewer or <a href="${rawFileUrl}" target="_blank" download class="text-indigo-600 hover:text-indigo-800 font-semibold">click here to download it</a>.
                             </p>
                         `,
-                        width: '90%', // Use a large width for better document viewing
+                        width: '90%', 
                         showCloseButton: true,
                         showConfirmButton: false,
                         customClass: {
@@ -297,14 +362,12 @@ const DetailModal = ({ isOpen, onClose, item, activeCollection, allProductLines,
 
             const handleRemoveFile = (indexToRemove, isNewFile) => {
                 if (isNewFile) {
-                    // Remove from new files
                     const updatedNewFiles = newFiles.filter((_, index) => index !== indexToRemove);
                     setFormData(prev => ({ 
                         ...prev, 
                         [field]: [...existingPaths, ...updatedNewFiles] 
                     }));
                 } else {
-                    // Remove from existing paths (CRITICAL: this signals the backend to delete the file/path)
                     const updatedExistingPaths = existingPaths.filter((_, index) => index !== indexToRemove);
                     setFormData(prev => ({ 
                         ...prev, 
@@ -320,11 +383,9 @@ const DetailModal = ({ isOpen, onClose, item, activeCollection, allProductLines,
                     {/* File Input */}
                     <input
                         type="file"
-                        // CHANGE 2A: CRITICAL: Add the multiple attribute
                         multiple 
                         accept={isImage ? "image/*" : "*/*"}
                         onChange={handleFileSelect}
-                        // key prop needs to be updated slightly as fileData is now an array of strings/objects
                         key={hasData ? (hasNewFiles ? 'new-files' : 'path-files') : 'empty'} 
                         className={`${baseClass} p-1 text-sm file:mr-4 file:py-1 file:px-2 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100`}
                         disabled={isLoading}
@@ -377,7 +438,7 @@ const DetailModal = ({ isOpen, onClose, item, activeCollection, allProductLines,
                                     </button>
                                 </div>
                             ))}
-                        </div>
+                         </div>
                     )}
 
                     {!hasData && <p className="text-xs text-gray-500 mt-1">No files currently attached.</p>}
@@ -386,7 +447,6 @@ const DetailModal = ({ isOpen, onClose, item, activeCollection, allProductLines,
         }
 
         if (type === 'checkbox') {
-             // Checkbox logic
              return (
                  <div className="flex items-center space-x-2 p-2 col-span-full">
                      <input
@@ -418,7 +478,6 @@ const DetailModal = ({ isOpen, onClose, item, activeCollection, allProductLines,
         );
     };
 
-    // Filter out internal columns, but include ID for viewing
     const displayFields = activeCollection.fields.filter(field => !EXCLUDED_INTERNAL_COLUMNS.includes(field));
 
     return (
@@ -473,17 +532,47 @@ const DetailModal = ({ isOpen, onClose, item, activeCollection, allProductLines,
     );
 };
 
-// --- AUTHENTICATION SCREEN ---
-// CRITICAL FIX: Ensure all props are correctly destructured in LoginScreen function signature
+// --- AUTHENTICATION SCREEN (UNCHANGED) ---
 const LoginScreen = ({ setAuthToken, setUserData, setIsLoading, isLoading }) => {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
-    const [displayName, setDisplayName] = useState('');
+    const [displayNameInput, setDisplayNameInput] = useState(''); 
+    const [derivedDisplayName, setDerivedDisplayName] = useState(''); 
     const [isSigningUp, setIsSigningUp] = useState(false);
     const [error, setError] = useState(null);
 
+    // NEW LOGIC: Effect to derive displayName from email
+    useEffect(() => {
+        if (isSigningUp && email) {
+            const match = email.match(/^([^.@]+)(?:\.([^@]+))?@/);
+            
+            let name = '';
+            if (match) {
+                const part1 = match[1] || '';
+                const part2 = match[2] || '';
+
+                const formatPart = (part) => part 
+                    ? part.charAt(0).toUpperCase() + part.slice(1).toLowerCase() 
+                    : '';
+                
+                name = [formatPart(part1), formatPart(part2)].filter(Boolean).join(' ');
+            }
+
+            if (name.trim() === '' && email.includes('@')) {
+                 name = email.split('@')[0].replace(/[^a-zA-Z]/g, ' ').trim();
+            }
+            
+            setDerivedDisplayName(name.trim());
+        } else {
+            setDerivedDisplayName('');
+        }
+    }, [email, isSigningUp]);
+    
+    const finalDisplayName = isSigningUp && derivedDisplayName && displayNameInput === '' 
+        ? derivedDisplayName 
+        : displayNameInput;
+
     const handleAuth = async (endpoint, payload) => {
-        // FIX: setIsLoading is now correctly defined via props
         setIsLoading(true);
         setError(null);
         
@@ -512,14 +601,13 @@ const LoginScreen = ({ setAuthToken, setUserData, setIsLoading, isLoading }) => 
             console.error(`${endpoint} error:`, err);
             setError(err.message || 'An unknown error occurred.');
         } finally {
-            // FIX: setIsLoading is now correctly defined via props
             setIsLoading(false);
         }
     };
 
     const handleSignup = (e) => {
         e.preventDefault();
-        handleAuth('signup', { email, password, displayName });
+        handleAuth('signup', { email, password, displayName: finalDisplayName }); 
     };
 
     const handleLogin = (e) => {
@@ -532,7 +620,7 @@ const LoginScreen = ({ setAuthToken, setUserData, setIsLoading, isLoading }) => 
             <div className="w-full max-w-md bg-white rounded-xl shadow-2xl p-8 space-y-6">
                 <h1 className="text-3xl font-bold text-center text-indigo-700 flex items-center justify-center">
                     <Database className="w-8 h-8 mr-2 text-indigo-500" />
-                    {isSigningUp ? 'Create Account' : 'Product and Productline Data'}
+                    {isSigningUp ? 'Create Account' : 'RFQ Data'}
                 </h1>
                 
                 {error && (
@@ -547,22 +635,32 @@ const LoginScreen = ({ setAuthToken, setUserData, setIsLoading, isLoading }) => 
                             <User className="w-5 h-5 text-gray-400 absolute left-3 top-1/2 transform -translate-y-1/2" />
                             <input
                                 type="text"
-                                placeholder="Display Name"
-                                value={displayName}
-                                onChange={(e) => setDisplayName(e.target.value)}
+                                placeholder="Display Name (Auto-Generated)"
+                                value={finalDisplayName} 
+                                onChange={(e) => setDisplayNameInput(e.target.value)} 
                                 required={isSigningUp}
-                                className="w-full p-3 pl-10 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
                                 disabled={isLoading}
+                                // MODIFICATION: Always apply grey style when signing up
+                                className="w-full p-3 pl-10 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 bg-gray-200 text-gray-500"
+                                readOnly={false} 
                             />
+                            <p className="text-xs text-gray-500 mt-1 pl-10">
+                                {derivedDisplayName 
+                                    ? `Derived name: ${derivedDisplayName}. Start typing to override.`
+                                    : 'Enter your work email first to auto-generate.'}
+                            </p>
                         </div>
                     )}
                     <div className="relative">
                         <Mail className="w-5 h-5 text-gray-400 absolute left-3 top-1/2 transform -translate-y-1/2" />
                             <input
                             type="email"
-                            placeholder="Email"
+                            placeholder="Email (e.g., name.lastname@avocarbon.com)"
                             value={email}
-                            onChange={(e) => setEmail(e.target.value)}
+                            onChange={(e) => {
+                                setEmail(e.target.value);
+                                setDisplayNameInput(''); 
+                            }}
                             required
                             className="w-full p-3 pl-10 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
                             disabled={isLoading}
@@ -595,14 +693,14 @@ const LoginScreen = ({ setAuthToken, setUserData, setIsLoading, isLoading }) => 
                     {isSigningUp ? (
                         <>
                             Already have an account?{' '}
-                            <button onClick={() => setIsSigningUp(false)} className="text-indigo-600 font-medium hover:text-indigo-800">
+                            <button onClick={() => {setIsSigningUp(false); setDisplayNameInput('');}} className="text-indigo-600 font-medium hover:text-indigo-800">
                                 Log In
                             </button>
                         </>
                     ) : (
                         <>
                             Need an account?{' '}
-                            <button onClick={() => setIsSigningUp(true)} className="text-indigo-600 font-medium hover:text-indigo-800">
+                            <button onClick={() => {setIsSigningUp(true); setDisplayNameInput('');}} className="text-indigo-600 font-medium hover:text-indigo-800">
                                 Sign Up
                             </button>
                         </>
@@ -613,14 +711,13 @@ const LoginScreen = ({ setAuthToken, setUserData, setIsLoading, isLoading }) => 
     );
 };
 
-// --- MAIN APPLICATION COMPONENT ---
+// --- MAIN APPLICATION COMPONENT (UPDATED) ---
 const App = () => {
     const [authToken, setAuthToken] = useState(sessionStorage.getItem('authToken'));
     const [userData, setUserData] = useState(() => {
         const storedUser = sessionStorage.getItem('userData');
         return storedUser ? JSON.parse(storedUser) : null;
     });
-    // NEW STATE: Tracks if this is the very first load (used to control initial spinner)
     const [isInitialLoad, setIsInitialLoad] = useState(true);
 
     const [items, setItems] = useState([]);
@@ -634,11 +731,12 @@ const App = () => {
     const [isLoading, setIsLoading] = useState(false);
     const [apiError, setApiError] = useState(null);
 
+    // NEW STATE: Column widths for adjustable table
+    const [columnWidths, setColumnWidths] = useState(initialColumnWidths);
     // NEW STATE: Client-side cache for main data and product lines
     const [dataCache, setDataCache] = useState({
         product_lines: { data: [], timestamp: 0 },
         products: { data: [], timestamp: 0 },
-        // Product lines are always needed for the relational field, so cache them separately too
         productLinesList: { data: [], timestamp: 0 }
     });
     
@@ -654,7 +752,7 @@ const App = () => {
     
     const activeCollection = initialCollections[activeCollectionKey];
 
-    // Check if the current user is an admin (CRITICAL FIX)
+    // Check if the current user is an admin 
     const isAdmin = userData && userData.user_role === 'admin';
 
     // Handler for logout (made a useCallback to be stable dependency for fetchData)
@@ -688,147 +786,124 @@ const App = () => {
     }, [authToken]);
 
 
-    // Reset new item data when collection switches
-    useEffect(() => {
-        setNewItemData(initialCollections[activeCollectionKey].defaultValues);
-        setIsFormVisible(false); // Hide form on collection switch
-        
-        // OPTIMIZATION: Display cached data immediately on tab switch if available
-        const cachedKey = activeCollectionKey; // 'product_lines' or 'products'
-        if (dataCache[cachedKey] && dataCache[cachedKey].data.length > 0) {
-            setItems(dataCache[cachedKey].data);
-            // Don't set isLoading true here, rely on the main fetchData logic to determine if a refresh is needed.
-        } else {
-             // If no cache, force a fetch to populate the view.
-             fetchData(true);
-        }
-    }, [activeCollectionKey]);
-
-
-// 1. Data Fetching (Simulates GET request to API)
-// CRITICAL FIX: Added isUserAction parameter to control when to show loading overlay.
-const fetchData = useCallback(async (isUserAction = false) => {
-    if (!authToken || !userData) {
-        setIsLoading(false);
-        return;
-    }
-    
-    if (isInitialLoad || isUserAction) { 
-        setIsLoading(true);
-    }
-    setApiError(null);
-
-    const currentTimestamp = Date.now();
-    const cacheTTL = 300000; // Cache Time-To-Live: 5 minutes (300000ms)
-    const cachedKey = activeCollectionKey;
-    
-    let shouldFetchMainData = isUserAction || !dataCache[cachedKey] || (currentTimestamp - dataCache[cachedKey].timestamp) > cacheTTL;
-    let shouldFetchProductLines = isUserAction || !dataCache.productLinesList || (currentTimestamp - dataCache.productLinesList.timestamp) > cacheTTL;
-    let shouldFetchLogs = isUserAction; 
-
-    const fetchPromises = [];
-
-    // Helper function to handle fetch and return null on non-critical error
-    const safeFetch = async (url, options, errorMessage) => {
-        try {
-            const response = await fetch(url, options);
-            if (!response.ok) {
-                 // Throwing here ensures the catch block is hit, but we handle it locally
-                const errorData = response.status !== 204 ? await response.json() : {};
-                throw new Error(errorData.message || errorMessage);
-            }
-            return response.json();
-        } catch (error) {
-            console.error(`Safe Fetch Error (${url}):`, error);
-            // Non-critical: Return null or an empty array if data fetching fails
-            setApiError(error.message);
-            return []; 
-        }
-    };
-
-    // 1. MAIN DATA Fetch
-    if (shouldFetchMainData) {
-        fetchPromises.push(
-            safeFetch(`${BASE_API_URL}${activeCollection.apiPath}`, 
-                { headers: { Authorization: `Bearer ${authToken}` } },
-                `Failed to fetch ${activeCollection.name} data.`
-            )
-        );
-    } else {
-        fetchPromises.push(Promise.resolve(dataCache[cachedKey].data));
-    }
-    
-    // 2. LOGS Fetch
-    if (shouldFetchLogs || isInitialLoad) {
-        fetchPromises.push(
-            safeFetch(`${BASE_API_URL}${LOGS_API_PATH}`, 
-                { headers: { Authorization: `Bearer ${authToken}` } },
-                'Failed to fetch Audit Logs.'
-            )
-        );
-    } else {
-        fetchPromises.push(Promise.resolve(logs));
-    }
-
-    // 3. PRODUCT LINES Fetch
-    if (shouldFetchProductLines) {
-        fetchPromises.push(
-            safeFetch(`${BASE_API_URL}${initialCollections.product_lines.apiPath}`, 
-                { headers: { Authorization: `Bearer ${authToken}` } },
-                'Failed to fetch Product Lines data.'
-            )
-        );
-    } else {
-        fetchPromises.push(Promise.resolve(dataCache.productLinesList.data));
-    }
-
-
-    try {
-        const [fetchedItems, fetchedLogs, fetchedProductLines] = await Promise.all(fetchPromises);
-        
-        // 1. Update Main Data
-        // Use the fetched data (if not null/error) or the existing cache data
-        const finalItems = fetchedItems.length > 0 ? fetchedItems : (dataCache[cachedKey]?.data || []);
-        setItems(finalItems);
-        if (shouldFetchMainData && fetchedItems.length > 0) {
-            setDataCache(prev => ({
-                ...prev,
-                [cachedKey]: { data: fetchedItems, timestamp: currentTimestamp }
-            }));
-        }
-        
-        // 2. Update Product Lines List
-        const finalProductLines = fetchedProductLines.length > 0 ? fetchedProductLines : (dataCache.productLinesList?.data || []);
-        setAllProductLines(finalProductLines);
-        if (shouldFetchProductLines && fetchedProductLines.length > 0) {
-             setDataCache(prev => ({
-                ...prev,
-                productLinesList: { data: fetchedProductLines, timestamp: currentTimestamp }
-            }));
-        }
-
-        // 3. Update Logs
-        if (shouldFetchLogs || isInitialLoad) {
-            setLogs(fetchedLogs);
-        }
-        
-    } catch (error) {
-        // This catch block will only hit if something critical outside safeFetch fails (e.g., Promise.all itself)
-        console.error("Critical error fetching data:", error);
-        if (error.message.includes('Failed to fetch') || error.message.includes('Invalid or expired token')) {
-            handleLogout(); 
-            setApiError("Session expired or API unreachable. Please log in again.");
-        } else {
-            setApiError(error.message || "Failed to fetch data from API. Check server status.");
-        }
-    } finally {
-        // This block is GUARANTEED to run and release the loading state.
-        if (isInitialLoad || isUserAction) { 
+    // Data Fetching (Simulates GET request to API)
+    const fetchData = useCallback(async (isUserAction = false) => {
+        if (!authToken || !userData) {
             setIsLoading(false);
-            setIsInitialLoad(false);
+            return;
         }
-    }
-}, [activeCollectionKey, authToken, userData, isInitialLoad, activeCollection.apiPath, activeCollection.name, handleLogout, dataCache, logs]); 
+        
+        if (isInitialLoad || isUserAction) { 
+            setIsLoading(true);
+        }
+        setApiError(null);
+
+        const currentTimestamp = Date.now();
+        const cacheTTL = 300000; // Cache Time-To-Live: 5 minutes (300000ms)
+        const cachedKey = activeCollectionKey;
+        
+        let shouldFetchMainData = isUserAction || !dataCache[cachedKey] || (currentTimestamp - dataCache[cachedKey].timestamp) > cacheTTL;
+        let shouldFetchProductLines = isUserAction || !dataCache.productLinesList || (currentTimestamp - dataCache.productLinesList.timestamp) > cacheTTL;
+        let shouldFetchLogs = isUserAction; 
+
+        const fetchPromises = [];
+
+        // Helper function to handle fetch and return null on non-critical error
+        const safeFetch = async (url, options, errorMessage) => {
+            try {
+                const response = await fetch(url, options);
+                if (!response.ok) {
+                    const errorData = response.status !== 204 ? await response.json() : {};
+                    throw new Error(errorData.message || errorMessage);
+                }
+                return response.json();
+            } catch (error) {
+                console.error(`Safe Fetch Error (${url}):`, error);
+                setApiError(error.message);
+                return []; 
+            }
+        };
+
+        // 1. MAIN DATA Fetch
+        if (shouldFetchMainData) {
+            fetchPromises.push(
+                safeFetch(`${BASE_API_URL}${activeCollection.apiPath}`, 
+                    { headers: { Authorization: `Bearer ${authToken}` } },
+                    `Failed to fetch ${activeCollection.name} data.`
+                )
+            );
+        } else {
+            fetchPromises.push(Promise.resolve(dataCache[cachedKey].data));
+        }
+        
+        // 2. LOGS Fetch
+        if (shouldFetchLogs || isInitialLoad) {
+            fetchPromises.push(
+                safeFetch(`${BASE_API_URL}${LOGS_API_PATH}`, 
+                    { headers: { Authorization: `Bearer ${authToken}` } },
+                    'Failed to fetch Audit Logs.'
+                )
+            );
+        } else {
+            fetchPromises.push(Promise.resolve(logs));
+        }
+
+        // 3. PRODUCT LINES Fetch
+        if (shouldFetchProductLines) {
+            fetchPromises.push(
+                safeFetch(`${BASE_API_URL}${initialCollections.product_lines.apiPath}`, 
+                    { headers: { Authorization: `Bearer ${authToken}` } },
+                    'Failed to fetch Product Lines data.'
+                )
+            );
+        } else {
+            fetchPromises.push(Promise.resolve(dataCache.productLinesList.data));
+        }
+
+
+        try {
+            const [fetchedItems, fetchedLogs, fetchedProductLines] = await Promise.all(fetchPromises);
+            
+            // 1. Update Main Data
+            const finalItems = fetchedItems.length > 0 ? fetchedItems : (dataCache[cachedKey]?.data || []);
+            setItems(finalItems);
+            if (shouldFetchMainData && fetchedItems.length > 0) {
+                setDataCache(prev => ({
+                    ...prev,
+                    [cachedKey]: { data: fetchedItems, timestamp: currentTimestamp }
+                }));
+            }
+            
+            // 2. Update Product Lines List
+            const finalProductLines = fetchedProductLines.length > 0 ? fetchedProductLines : (dataCache.productLinesList?.data || []);
+            setAllProductLines(finalProductLines);
+            if (shouldFetchProductLines && fetchedProductLines.length > 0) {
+                 setDataCache(prev => ({
+                    ...prev,
+                    productLinesList: { data: fetchedProductLines, timestamp: currentTimestamp }
+                }));
+            }
+
+            // 3. Update Logs
+            if (shouldFetchLogs || isInitialLoad) {
+                setLogs(fetchedLogs);
+            }
+            
+        } catch (error) {
+            console.error("Critical error fetching data:", error);
+            if (error.message.includes('Failed to fetch') || error.message.includes('Invalid or expired token')) {
+                handleLogout(); 
+                setApiError("Session expired or API unreachable. Please log in again.");
+            } else {
+                setApiError(error.message || "Failed to fetch data from API. Check server status.");
+            }
+        } finally {
+            if (isInitialLoad || isUserAction) { 
+                setIsLoading(false);
+                setIsInitialLoad(false);
+            }
+        }
+    }, [activeCollectionKey, authToken, userData, isInitialLoad, activeCollection.apiPath, activeCollection.name, handleLogout, dataCache, logs]); 
 
 
     // Initial fetch and polling setup
@@ -844,72 +919,54 @@ const fetchData = useCallback(async (isUserAction = false) => {
         // Then, initiate a background fetch without showing the spinner
         fetchData(false); 
     } else {
-         // If no cache (first time load), force a full fetch with spinner.
-         fetchData(true);
+        // If no cache (first time load), force a full fetch with spinner.
+        fetchData(true);
     }
-    // Dependency array updated to include dataCache for cache check
 }, [activeCollectionKey, dataCache, fetchData]); 
 
 
-    // --- CRUD Handlers ---
+    // --- CRUD Handlers (UNCHANGED) ---
 
-    // CRITICAL CHANGE: handleRequest now detects Array of File objects and sends FormData
     const handleRequest = async (method, path, body = null, successCallback = () => {}) => {
         if (!authToken) return;
-        // Keep this set to true for user-initiated actions (CRUD)
         setIsLoading(true); 
         setApiError(null);
 
         const fileFields = ['attachments_raw', 'product_pictures'];
         
-        // CHANGE 3A: Check for presence of an ARRAY of File objects in the body
         const hasFile = body && fileFields.some(field => Array.isArray(body[field]) && body[field].some(f => f instanceof File)); 
 
         let headers = {};
         let requestBody = null;
 
         if (hasFile) {
-            // Use FormData for file upload
             const formData = new FormData();
             
             for (const key in body) {
-                // 1. Handle Multiple Files
                 if (fileFields.includes(key) && Array.isArray(body[key])) {
-                    // Iterate over the array of files (or file paths)
                     body[key].forEach(fileOrPath => {
                         if (fileOrPath instanceof File) {
-                            // Append each new File object to the FormData
                             formData.append(`${key}`, fileOrPath, fileOrPath.name); 
                         } else if (typeof fileOrPath === 'string' && fileOrPath.startsWith('uploads/')) {
-                            // Retain existing file paths/links. The backend must handle this retained data.
-                            // We use a specific key suffix to differentiate retained paths from new file uploads.
                             formData.append(`${key}_retained`, fileOrPath); 
                         }
                     });
                 }
-                // 2. Handle Non-File Data
                 else if (!fileFields.includes(key) && body[key] !== null && key !== 'id') { 
-                    // Stringify non-file objects/numbers for FormData 
-                    // CRITICAL: Must stringify JSON objects (like capacity/etc) as Multer expects strings.
-                    // For primitive types (string, number, boolean), simply appending is fine.
                     formData.append(key, body[key]);
                 }
             }
-            // Headers must NOT contain 'Content-Type': 'application/json' for Multer/FormData
             headers = { 'Authorization': `Bearer ${authToken}` };
             requestBody = formData;
         } else {
-            // Use JSON for standard data (when NO new files are selected, only existing paths or no files)
             headers = { 
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${authToken}`,
             };
-            // Ensure we remove 'id' from the JSON body for PUT/POST
-            // If file fields exist, ensure they are sent as an array of paths (or empty array)
+            const fileFields = ['attachments_raw', 'product_pictures'];
             const jsonBody = body ? Object.keys(body).reduce((acc, key) => {
                 if (key !== 'id') {
                     if (fileFields.includes(key) && Array.isArray(body[key])) {
-                        // Send the array of retained paths/links
                         acc[key] = body[key].filter(f => typeof f === 'string' && f.startsWith('uploads/'));
                     } else {
                         acc[key] = body[key];
@@ -932,7 +989,6 @@ const fetchData = useCallback(async (isUserAction = false) => {
                 throw new Error(errorData.message || `API call failed with status ${response.status}.`);
             }
 
-            // Success Notification
             if (method === 'POST') {
                 Swal.fire('Created!', `${activeCollection.name.slice(0, -1)} successfully created.`, 'success');
             } else if (method === 'PUT') {
@@ -941,21 +997,18 @@ const fetchData = useCallback(async (isUserAction = false) => {
                  Swal.fire('Deleted!', `${activeCollection.name.slice(0, -1)} permanently removed.`, 'success');
             }
 
-            // OPTIMIZATION: Invalidate the relevant cache entry on successful CRUD
             setDataCache(prev => ({
                 ...prev,
-                [activeCollectionKey]: { data: [], timestamp: 0 }, // Invalidate main data
-                productLinesList: { data: [], timestamp: 0 } // Invalidate PL list too, just in case
+                [activeCollectionKey]: { data: [], timestamp: 0 }, 
+                productLinesList: { data: [], timestamp: 0 } 
             }));
 
 
             successCallback();
-            // CRITICAL FIX: Call fetchData(true) to trigger a data refresh AND show the loading spinner during the refresh.
             fetchData(true); 
 
         } catch (error) {
             console.error(`Error during ${method} operation:`, error);
-            // Display error notification
             Swal.fire('Error!', `${error.message}`, 'error');
             setApiError(error.message || "An unknown error occurred during API operation.");
         } finally {
@@ -967,14 +1020,11 @@ const fetchData = useCallback(async (isUserAction = false) => {
     const handleCreate = (e) => {
         e.preventDefault();
         
-        // --- Validation Check ---
         const requiredCheck = activeCollection.requiredFields.every(field => {
             const value = newItemData[field];
             
-            // Checkbox fields are optional and default to false
             if (activeCollectionKey === 'products' && field === 'prod_if_customer_in_china') return true;
             
-            // File fields are arrays now: must check length if required
             if (getFieldType(field).includes('file')) {
                  return Array.isArray(value) && value.length > 0;
             }
@@ -992,25 +1042,20 @@ const fetchData = useCallback(async (isUserAction = false) => {
              return;
         }
         
-        // --- DATA PREPARATION BEFORE SENDING ---
         let itemToCreate = { ...newItemData };
 
-        // Whitelist keys based on the active collection's defined fields
         const allowedFields = activeCollection.fields.filter(field => !EXCLUDED_INTERNAL_COLUMNS.includes(field));
         
         const finalPayload = Object.keys(itemToCreate).reduce((acc, key) => {
             if (allowedFields.includes(key)) { 
                 const value = itemToCreate[key];
                 
-                // File objects are kept as is (they signal FormData upload). Since they are arrays now, check the array.
                 if (getFieldType(key).includes('file')) {
                     acc[key] = Array.isArray(value) ? value : [];
                 } 
-                // Handle numeric conversion for the database
                 else if (key === 'gmdc_pct' || key === 'estimated_price') {
                      acc[key] = parseFloat(value);
                 } 
-                // Include other data, including path strings or null for non-file data
                 else {
                     acc[key] = value;
                 }
@@ -1018,10 +1063,7 @@ const fetchData = useCallback(async (isUserAction = false) => {
             return acc;
         }, {});
         
-        // Database Type Specific ID Handling
-        delete finalPayload.id; // Let PostgreSQL auto-generate BIGINT
-        
-        // --- END DATA PREPARATION ---
+        delete finalPayload.id; 
 
         handleRequest(
             'POST', 
@@ -1029,43 +1071,37 @@ const fetchData = useCallback(async (isUserAction = false) => {
             finalPayload, 
             () => { 
                 setNewItemData(initialCollections[activeCollectionKey].defaultValues);
-                setIsFormVisible(false); // Hide form on successful creation
+                setIsFormVisible(false); 
             }
         );
     };
 
     const handleUpdate = (id, formData) => {
         
-        // --- DATA PREPARATION BEFORE SENDING (Similar to create) ---
         const allowedFields = activeCollection.fields.filter(field => !EXCLUDED_INTERNAL_COLUMNS.includes(field));
         
         const finalPayload = Object.keys(formData).reduce((acc, key) => {
             if (allowedFields.includes(key)) { 
                 const value = formData[key];
                 
-                 // File objects are kept as is (they signal FormData upload). They should be an array of File/Path.
                 if (getFieldType(key).includes('file')) {
                     acc[key] = Array.isArray(value) ? value : [];
                 } 
-                // Handle numeric conversion
                 else if (key === 'gmdc_pct' || key === 'estimated_price') {
                      acc[key] = parseFloat(value);
                 }
-                // Include other data, including path strings or null for non-file data
                 else {
                     acc[key] = value;
                 }
             }
             return acc;
         }, {});
-        
-        // --- END DATA PREPARATION ---
 
         handleRequest(
             'PUT', 
             `${activeCollection.apiPath}/${id}`, 
-            finalPayload, // The ID will be used from the URL path
-            () => { // Success callback
+            finalPayload, 
+            () => { 
                 setModalData(null);
                 setIsModalOpen(false);
             }
@@ -1073,7 +1109,6 @@ const fetchData = useCallback(async (isUserAction = false) => {
     };
 
     const handleDelete = (id) => {
-        // --- SWEETALERT2 CONFIRMATION ---
         Swal.fire({
             title: 'Are you sure?',
             text: `You are about to delete this ${activeCollection.name.slice(0, -1)}. This action is permanent and will be logged.`,
@@ -1089,17 +1124,14 @@ const fetchData = useCallback(async (isUserAction = false) => {
         });
     };
     
-    // --- UI State Handlers ---
+    // --- UI State Handlers (UNCHANGED) ---
 
-    // Opens modal and sets data for viewing/editing
     const openModalForEdit = (item) => {
-        // Ensure file fields are arrays before setting modalData
         const product_pictures = Array.isArray(item.product_pictures) ? item.product_pictures : (item.product_pictures ? [item.product_pictures] : []);
         const attachments_raw = Array.isArray(item.attachments_raw) ? item.attachments_raw : (item.attachments_raw ? [item.attachments_raw] : []);
         
         setModalData({
             ...item,
-            // CRITICAL FIX: Ensure DB paths (which are strings) are parsed into an array if they were stored as a JSON string
             product_pictures: (typeof item.product_pictures === 'string' && item.product_pictures.startsWith('[')) ? JSON.parse(item.product_pictures) : product_pictures,
             attachments_raw: (typeof item.attachments_raw === 'string' && item.attachments_raw.startsWith('[')) ? JSON.parse(item.attachments_raw) : attachments_raw,
         });
@@ -1109,17 +1141,12 @@ const fetchData = useCallback(async (isUserAction = false) => {
     const handleCollectionSwitch = (key) => {
         setActiveCollectionKey(key);
         setItemFilterTerm('');
-        setActiveFilterField(null); // Reset filter field when switching collections
-        setIsFormVisible(false); // Hide form on switch
-        
-        // Data display is now handled by the useEffect hook above which checks the cache first
+        setActiveFilterField(null); 
+        setIsFormVisible(false); 
     };
     
-    // Handler used by inputs in the New Item Form
     const handleNewItemChange = (field, value) => {
-        // CRITICAL CHANGE: Handle File object Array storage
         if (getFieldType(field).includes('file')) {
-             // Value is expected to be an Array of File objects (or empty array)
              setNewItemData(prev => ({ ...prev, [field]: value }));
              return;
         }
@@ -1128,14 +1155,13 @@ const fetchData = useCallback(async (isUserAction = false) => {
         setNewItemData(prev => ({ ...prev, [field]: finalValue }));
     };
     
-    // Handler for form cancellation
     const cancelForm = () => {
         setNewItemData(initialCollections[activeCollectionKey].defaultValues);
         setIsFormVisible(false);
     };
 
 
-    // --- Filtering Logic (Client-Side) ---
+    // --- Filtering Logic (Client-Side) (UNCHANGED) ---
     
     const uniqueFilterValues = useMemo(() => {
         if (!activeFilterField) return [];
@@ -1166,11 +1192,9 @@ const fetchData = useCallback(async (isUserAction = false) => {
 
     const filteredLogs = useMemo(() => {
         const term = logFilterTerm.toLowerCase().trim();
-        // Since the backend now filters out LOGIN/LOGOUT and limits the result set, 
-        // we only perform client-side filtering on the returned, limited data.
         if (!term) return logs;
         
-        const excludedActions = ['LOGIN', 'LOGOUT']; // Excluded by DB, but safe check
+        const excludedActions = ['LOGIN', 'LOGOUT']; 
 
         return logs.filter(log => !excludedActions.includes(log.action)).filter(log => 
             (log.action?.toLowerCase().includes(term)) ||
@@ -1180,34 +1204,24 @@ const fetchData = useCallback(async (isUserAction = false) => {
         );
     }, [logs, logFilterTerm]);
 
-    // --- Render Functions ---
+    // --- Render Functions (UPDATED) ---
     
     const renderHeader = () => (
         <header className="bg-gray-800 p-4 shadow-lg flex justify-between items-center flex-wrap">
             <div className="flex items-center space-x-4">
-                {/* 1. App Icon (Small Image/Icon) - FIX: Matching HTML logic (max-width, no fixed height) */}
                 <img 
-                    src={logoAvocarbon} // Using the image the HTML used for the main logo
+                    src={logoAvocarbon} 
                     alt="AVOCARBON Logo" 
-                    // CRITICAL FIX: Use Tailwind classes to enforce max height and object-contain.
-                    // Removed rounded-full and bg-white to match the HTML structure (which only uses the .logo class).
-                    // Use a max-height (h-10) and w-auto (which is equivalent to max-width and proportional scaling).
                     className="h-10 w-auto object-contain mr-2" 
                     title="AVOCARBON"
                 />
-
-                {/* 2. Main Title */}
                 <h1 className="text-2xl font-extrabold text-indigo-400 flex items-center">
-                    {/* Database icon is now slightly separated or removed, following the HTML header style */}
-                    Products and Product Lines StreamLine
+                    RFQ StreamLine
                 </h1>
             </div>
-
-            {/* User Info and Logout */}
             <div className="text-right flex items-center space-x-4 mt-2 sm:mt-0">
                 <span className="text-sm font-medium text-gray-300 truncate max-w-xs flex items-center">
                      {userData.displayName} 
-                    {/* Role Indicator */}
                     {isAdmin && <Shield className="w-4 h-4 ml-2 text-yellow-400 inline" title="Administrator Access" />}
                 </span>
                 <button
@@ -1232,7 +1246,6 @@ const fetchData = useCallback(async (isUserAction = false) => {
                         const label = field.toUpperCase().replace(/_/g, ' ');
                         const baseClass = "p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 shadow-sm";
                         
-                        // --- RELATIONAL DROPDOWN FOR PRODUCTS ---
                         if (activeCollectionKey === 'products' && field === 'product_line') {
                             return (
                                 <div key={field} className="relative flex flex-col">
@@ -1255,52 +1268,48 @@ const fetchData = useCallback(async (isUserAction = false) => {
                                 </div>
                             );
                         }
-                        // --- FILE INPUTS (IMAGE/ATTACHMENT) ---
                         if (type === 'file_image' || type === 'file_attachment') {
                             const isImage = type === 'file_image';
                             
-                            // CHANGE 2C: Handle file selection for MULTIPLE files
                             const handleFileSelect = (e) => {
                                 const files = Array.from(e.target.files); 
-                                handleNewItemChange(field, files); // CRITICAL: Call handler with the array of File objects
+                                handleNewItemChange(field, files); 
                                 e.target.value = null;  
                             };
                             
-                            const currentFiles = Array.isArray(newItemData[field]) ? newItemData[field] : []; // This will be an array of File objects
+                            const currentFiles = Array.isArray(newItemData[field]) ? newItemData[field] : []; 
                             
                             return (
                                 <div key={field} className="relative flex flex-col col-span-full">
                                     <label className="text-xs font-medium text-gray-500 mb-1">{label} {isRequired && '*'}</label>
                                     <input
                                         type="file"
-                                        // CRITICAL CHANGE: Add the multiple attribute
                                         multiple 
                                         accept={isImage ? "image/*" : "*/*"}
                                         onChange={handleFileSelect}
-                                        key={currentFiles.length > 0 ? 'new-files' : 'empty'} // Key hack to reset input when file is cleared
+                                        key={currentFiles.length > 0 ? 'new-files' : 'empty'} 
                                         className={`${baseClass} p-1 text-sm file:mr-4 file:py-1 file:px-2 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100`}
                                         disabled={isLoading}
                                     />
                                     {currentFiles.length > 0 && (
-                                        <div className="flex justify-between items-center mt-1">
-                                            <p className="text-xs text-blue-600">
-                                                New Files Selected: {currentFiles.length} file(s)
-                                            </p>
-                                            <button
-                                                type="button"
-                                                onClick={() => handleNewItemChange(field, [])} // Clear to empty array
-                                                className="text-red-500 text-xs hover:text-red-700"
-                                            >
-                                                Clear
-                                            </button>
-                                        </div>
+                                         <div className="flex justify-between items-center mt-1">
+                                             <p className="text-xs text-blue-600">
+                                                 New Files Selected: {currentFiles.length} file(s)
+                                             </p>
+                                             <button
+                                                 type="button"
+                                                 onClick={() => handleNewItemChange(field, [])} 
+                                                 className="text-red-500 text-xs hover:text-red-700"
+                                             >
+                                                 Clear
+                                             </button>
+                                         </div>
                                     )}
                                     {currentFiles.length === 0 && <p className="text-xs text-gray-500 mt-1">No files currently selected.</p>}
                                 </div>
                             );
                         }
 
-                        // --- TEXTAREA FOR LONG FIELDS ---
                         if (type === 'textarea') {
                             return (
                                 <div key={field} className="relative flex flex-col col-span-full sm:col-span-2">
@@ -1317,7 +1326,6 @@ const fetchData = useCallback(async (isUserAction = false) => {
                                 </div>
                             );
                         }
-                        // --- CHECKBOX FOR BOOLEAN FIELDS ---
                         if (type === 'checkbox') {
                              return (
                                  <div key={field} className="flex items-center space-x-2">
@@ -1334,7 +1342,6 @@ const fetchData = useCallback(async (isUserAction = false) => {
                              );
                         }
                         
-                        // --- DEFAULT INPUT (TEXT/NUMBER) ---
                         return (
                             <div key={field} className="relative flex flex-col">
                                  <label className="text-xs font-medium text-gray-500 mb-1">{label} {isRequired && '*'}</label>
@@ -1353,7 +1360,6 @@ const fetchData = useCallback(async (isUserAction = false) => {
                     })}
                 </div>
                 
-                {/* Form Actions (FIXED: Always present inside the collapsing div for all forms) */}
                 <div className="flex justify-end space-x-3 pt-4 border-t">
                     <button
                         type="button"
@@ -1388,7 +1394,6 @@ const fetchData = useCallback(async (isUserAction = false) => {
                     <span className="ml-2 text-sm font-medium text-indigo-500 p-1 bg-indigo-50 rounded-full">{items.length} items</span>
                 </h2>
                 
-                {/* Toggle Create Form Button */}
                 <button
                     onClick={() => setIsFormVisible(prev => !prev)}
                     className={`px-4 py-2 text-sm font-semibold rounded-lg shadow-md transition duration-150 flex items-center ${isFormVisible ? 'bg-gray-400 hover:bg-gray-500 text-white' : 'bg-indigo-600 hover:bg-indigo-700 text-white'}`}
@@ -1406,15 +1411,13 @@ const fetchData = useCallback(async (isUserAction = false) => {
                 </div>
             )}
             
-            {/* Filter Controls */}
             <div className="flex space-x-2 mb-4">
-                 {/* 1. Filter Field Selector (Dropdown) */}
                 <div className="relative">
                     <select
                         onChange={(e) => {
                             const field = e.target.value;
                             setActiveFilterField(field === "" ? null : field);
-                            setItemFilterTerm(""); // Reset term when field changes
+                            setItemFilterTerm(""); 
                         }}
                         value={activeFilterField || ""}
                         className="appearance-none pr-8 pl-3 py-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 shadow-sm"
@@ -1430,7 +1433,6 @@ const fetchData = useCallback(async (isUserAction = false) => {
                     <ChevronDown className="w-4 h-4 text-gray-500 absolute right-2 top-1/2 transform -translate-y-1/2 pointer-events-none" />
                 </div>
 
-                {/* 2. Filter Input (Text or Dropdown) */}
                 <div className="relative">
                     {activeFilterField ? (
                         <select
@@ -1460,18 +1462,14 @@ const fetchData = useCallback(async (isUserAction = false) => {
                 </div>
             </div>
             
-            {/* COMPACT TABLE DISPLAY */}
-            <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                    <tr>
-                        {activeCollection.compactFields.map(field => (
-                            <th key={field} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                {field.toUpperCase().replace(/_/g, ' ')}
-                            </th>
-                        ))}
-                        <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Details</th>
-                    </tr>
-                </thead>
+            {/* RESIZABLE TABLE DISPLAY */}
+            <table className="min-w-full divide-y divide-gray-200" style={{ tableLayout: 'fixed' }}>
+                <ResizableTableHeader 
+                    columns={activeCollection.compactFields} 
+                    columnWidths={columnWidths}
+                    setColumnWidths={setColumnWidths}
+                />
+                
                 <tbody className="bg-white divide-y divide-gray-200">
                     {isLoading && items.length === 0 ? (
                         <tr>
@@ -1492,13 +1490,18 @@ const fetchData = useCallback(async (isUserAction = false) => {
                                     const type = getFieldType(field);
                                     
                                     return (
-                                        <td key={field} className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 truncate max-w-[150px]">
+                                        <td 
+                                            key={field} 
+                                            // Apply dynamic width style to the cell
+                                            style={{ width: columnWidths[field] || 'auto' }}
+                                            className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 truncate overflow-hidden"
+                                        >
                                             {field === 'id' ? String(item[field]).substring(0, 8) + '...' 
                                                 : type === 'checkbox' ? (item[field] ? 'Yes' : 'No') 
                                                 : String(item[field] || 'N/A')}
                                         </td>
                                     )})}
-                                <td className="px-4 py-3 whitespace-nowrap text-center text-sm font-medium">
+                                <td style={{ width: 120 }} className="px-4 py-3 whitespace-nowrap text-center text-sm font-medium">
                                     <button 
                                         onClick={() => openModalForEdit(item)} 
                                         className="text-indigo-600 hover:text-indigo-800 transition p-1 rounded-full hover:bg-indigo-100 disabled:opacity-50" 
@@ -1524,95 +1527,118 @@ const fetchData = useCallback(async (isUserAction = false) => {
         </div>
     );
 
-    const renderAuditLogs = () => (
-        <div className="mt-8 bg-gray-50 p-6 rounded-xl shadow-xl overflow-x-auto">
-            <div className="flex justify-between items-center mb-4 flex-wrap">
-                <h2 className="text-2xl font-bold text-gray-800 flex items-center">
-                    <Clock className="w-6 h-6 mr-2 text-yellow-600" />
-                    Audit Logs
-                </h2>
-                <div className="relative mt-2 sm:mt-0">
-                    <input
-                        type="text"
-                        placeholder="Filter Logs (Action, User, or Table)"
-                        value={logFilterTerm}
-                        onChange={(e) => setLogFilterTerm(e.target.value)}
-                        className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-yellow-500 focus:border-yellow-500 shadow-sm w-full sm:w-64"
-                        disabled={isLoading}
-                    />
-                    <Filter className="w-5 h-5 text-gray-400 absolute left-3 top-1/2 transform -translate-y-1/2" />
+    // --- AUDIT LOGS RENDER FUNCTION (UPDATED) ---
+    const renderAuditLogs = () => {
+        // Define the columns for the logs table using strings that match the columnWidths keys
+        const logColumns = ['Action', 'User', 'Table', 'Record ID', 'Timestamp'];
+
+        return (
+            <div className="mt-8 bg-gray-50 p-6 rounded-xl shadow-xl overflow-x-auto">
+                <div className="flex justify-between items-center mb-4 flex-wrap">
+                    <h2 className="text-2xl font-bold text-gray-800 flex items-center">
+                        <Clock className="w-6 h-6 mr-2 text-yellow-600" />
+                        Audit Logs
+                    </h2>
+                    <div className="relative mt-2 sm:mt-0">
+                        <input
+                            type="text"
+                            placeholder="Filter Logs (Action, User, or Table)"
+                            value={logFilterTerm}
+                            onChange={(e) => setLogFilterTerm(e.target.value)}
+                            className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-yellow-500 focus:border-yellow-500 shadow-sm w-full sm:w-64"
+                            disabled={isLoading}
+                        />
+                        <Filter className="w-5 h-5 text-gray-400 absolute left-3 top-1/2 transform -translate-y-1/2" />
+                    </div>
                 </div>
-            </div>
-            <p className="text-sm text-gray-600 mb-4">Every user action is recorded here.</p>
-            
-            <div className="max-h-96 overflow-y-auto border border-gray-300 rounded-lg">
-                <table className="min-w-full divide-y divide-gray-300">
-                    <thead className="bg-gray-200 sticky top-0">
-                        <tr>
-                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-600 uppercase">Action</th>
-                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-600 uppercase">User</th>
-                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-600 uppercase">Table</th>
-                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-600 uppercase">Record ID</th>
-                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-600 uppercase">Timestamp</th>
-                        </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                        {filteredLogs.length === 0 ? (
-                            <tr>
-                                <td colSpan="5" className="px-4 py-4 text-center text-gray-500">
-                                    No matching logs found.
-                                
-                                </td>
-                            </tr>
-                        ) : (
-                            filteredLogs.map((log, index) => (
-                                <tr key={index} className="hover:bg-yellow-50">
-                                    <td className={`px-4 py-2 whitespace-nowrap text-sm font-semibold ${log.action === 'CREATE' ? 'text-green-600' : log.action === 'UPDATE' ? 'text-blue-600' : 'text-red-600'}`}>
-                                        {log.action}
-                                    </td>
-                                    <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-800 font-medium">
-                                        {log.user_name || log.user_id}
-                                    </td>
-                                    <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-500">
-                                        {log.table_name}
-                                    </td>
-                                    <td className="px-4 py-2 whitespace-nowrap text-xs font-mono text-gray-500">
-                                        {String(log.document_id).substring(0, 8)}...
-                                    </td>
-                                    <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-500">
-                                        {formatTimestamp(log.logged_at)}
+                <p className="text-sm text-gray-600 mb-4">Every user action is recorded here.</p>
+                
+                <div className="max-h-96 overflow-y-auto border border-gray-300 rounded-lg">
+                    {/* CRITICAL: Added style={{ tableLayout: 'fixed' }} for resizing to work */}
+                    <table className="min-w-full divide-y divide-gray-300" style={{ tableLayout: 'fixed' }}>
+                        
+                        {/* Use ResizableTableHeader for Audit Logs */}
+                        <ResizableTableHeader
+                            columns={logColumns}
+                            columnWidths={columnWidths}
+                            setColumnWidths={setColumnWidths}
+                            actionColumnTitle={null} // Audit logs don't have an action column
+                        />
+                        
+                        <tbody className="bg-white divide-y divide-gray-200">
+                            {filteredLogs.length === 0 ? (
+                                <tr>
+                                    <td colSpan="5" className="px-4 py-4 text-center text-gray-500">
+                                        No matching logs found.
                                     </td>
                                 </tr>
-                            ))
-                        )}
-                    </tbody>
-                </table>
+                            ) : (
+                                filteredLogs.map((log, index) => (
+                                    <tr key={index} className="hover:bg-yellow-50">
+                                        <td 
+                                            // Apply dynamic width to cells
+                                            style={{ width: columnWidths['Action'] }}
+                                            className={`px-4 py-2 whitespace-nowrap text-sm font-semibold ${log.action === 'CREATE' ? 'text-green-600' : log.action === 'UPDATE' ? 'text-blue-600' : 'text-red-600'}`}
+                                        >
+                                            {log.action}
+                                        </td>
+                                        <td 
+                                            // Apply dynamic width to cells
+                                            style={{ width: columnWidths['User'] }}
+                                            className="px-4 py-2 whitespace-nowrap text-sm text-gray-800 font-medium"
+                                        >
+                                            {log.user_name || log.user_id}
+                                        </td>
+                                        <td 
+                                            // Apply dynamic width to cells
+                                            style={{ width: columnWidths['Table'] }}
+                                            className="px-4 py-2 whitespace-nowrap text-sm text-gray-500"
+                                        >
+                                            {log.table_name}
+                                        </td>
+                                        <td 
+                                            // Apply dynamic width to cells
+                                            style={{ width: columnWidths['Record ID'] }}
+                                            className="px-4 py-2 whitespace-nowrap text-xs font-mono text-gray-500"
+                                        >
+                                            {String(log.document_id).substring(0, 8)}
+                                        </td>
+                                        <td 
+                                            // Apply dynamic width to cells
+                                            style={{ width: columnWidths['Timestamp'] }}
+                                            className="px-4 py-2 whitespace-nowrap text-sm text-gray-500"
+                                        >
+                                            {formatTimestamp(log.logged_at)}
+                                        </td>
+                                    </tr>
+                                ))
+                            )}
+                        </tbody>
+                    </table>
+                </div>
             </div>
-        </div>
-    );
+        );
+    };
 
     
-    // --- NEW: Signature and Branding Footer Component ---
+    // --- Signature and Branding Footer Component (UNCHANGED) ---
     const renderSignature = () => (
         <footer className="bg-gray-800 text-gray-400 py-4 mt-auto shadow-inner">
             <div className="max-w-7xl mx-auto flex justify-between items-center px-4 sm:px-8">
-                {/* Company Logo/Picture - FIX: Using the secondary logo with h-8 (standard footer height) */}
                 <div className="flex items-center space-x-3">
                      <img 
-                        src={logoAvocarbon} // Using the secondary logo image
+                        src={logoAvocarbon} 
                         alt="AVOCARBON Logo" 
-                        // FIX: Use h-8 and w-auto for proportional scaling.
                         className="h-10 w-auto object-contain mr-2" 
                         title="AVOCARBON"
                     />
                     <span className="text-sm font-light hidden sm:inline">
-                        — Built by AVOCarbon AI Team
+                        — Built for StreamLine Operations
                     </span>
                 </div>
 
-                {/* Signature Line/Version */}
                 <p className="text-xs">
-                    © {new Date().getFullYear()} Product and Productline StreamLine. All rights reserved. | Version 1.2
+                    © {new Date().getFullYear()} RFQ StreamLine. All rights reserved. | Version 1.2
                 </p>
             </div>
         </footer>
@@ -1620,7 +1646,6 @@ const fetchData = useCallback(async (isUserAction = false) => {
 
 
     if (!authToken || !userData) {
-        // The props are: { setAuthToken, setUserData, setIsLoading, isLoading }
         return <LoginScreen 
             setAuthToken={setAuthToken} 
             setUserData={setUserData} 
