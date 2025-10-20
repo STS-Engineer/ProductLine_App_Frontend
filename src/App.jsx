@@ -4,7 +4,7 @@ import Swal from "sweetalert2";
 import logoAvocarbon from './assets/logo-avocarbon.png';
 
 // IMPORTANT: Update this to your deployed API server URL when moving off localhost
-const BASE_API_URL = 'http://localhost:3001';
+const BASE_API_URL = 'https://product-db-back.azurewebsites.net';
 
 // List of columns managed by the server/database that should NOT be shown in forms or tables
 const EXCLUDED_INTERNAL_COLUMNS = ['created_at', 'created_by', 'updated_at', 'updated_by', 'password_hash', 'product_line_id'];
