@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { LogOut, Plus, Trash2, Save, X, Clock, Filter, Database, User, Mail, Zap, Loader, ChevronDown, Eye, Shield, FileText } from 'lucide-react'; 
 import Swal from "sweetalert2"; 
 import logoAvocarbon from './assets/logo-avocarbon.png';
@@ -10,6 +10,66 @@ const BASE_API_URL = 'https://product-db-back.azurewebsites.net';
 const EXCLUDED_INTERNAL_COLUMNS = ['created_at', 'created_by', 'updated_at', 'updated_by', 'password_hash', 'product_line_id'];
 const CHARACTER_EXPANSION_THRESHOLD = 30; // Threshold for long text fields in the modal
 
+const ResizableTableHeader = ({ columns, columnWidths, setColumnWidths }) => {
+    const tableRef = useRef(null);
+
+    const startResizing = useCallback((e, colKey) => {
+        e.preventDefault();
+        const startX = e.clientX;
+        const currentWidth = columnWidths[colKey];
+        
+        // Ensure the width is a number before starting the resize
+        if (typeof currentWidth !== 'number') return; 
+
+        const mouseMoveHandler = (moveEvent) => {
+            const widthChange = moveEvent.clientX - startX;
+            // Limit minimum column width to prevent collapse
+            const newWidth = Math.max(50, currentWidth + widthChange); 
+            
+            setColumnWidths(prev => ({ 
+                ...prev, 
+                [colKey]: newWidth 
+            }));
+        };
+
+        const mouseUpHandler = () => {
+            document.removeEventListener('mousemove', mouseMoveHandler);
+            document.removeEventListener('mouseup', mouseUpHandler);
+        };
+
+        document.addEventListener('mousemove', mouseMoveHandler);
+        document.addEventListener('mouseup', mouseUpHandler);
+    }, [columnWidths, setColumnWidths]);
+
+    return (
+        <thead className="bg-gray-50" ref={tableRef}>
+            <tr>
+                {columns.map((field) => (
+                    <th 
+                        key={field} 
+                        style={{ width: columnWidths[field], minWidth: 50 }}
+                        className="relative px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                    >
+                        <div className="flex items-center justify-between">
+                            {field.toUpperCase().replace(/_/g, ' ')}
+                            
+                            {/* Resizer Handle */}
+                            <div
+                                className="absolute top-0 right-[-5px] w-2 h-full cursor-col-resize hover:bg-indigo-300 transition"
+                                onMouseDown={(e) => startResizing(e, field)}
+                                title="Drag to resize column"
+                            />
+                        </div>
+                    </th>
+                ))}
+                {/* Fixed 'Details' column */}
+                <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-[120px]">
+                    Details
+                </th>
+            </tr>
+        </thead>
+    );
+};
 // --- Data Model Configuration based on PostgreSQL schema ---
 const initialCollections = {
     product_lines: {
@@ -37,6 +97,16 @@ const initialCollections = {
         // CHANGE 1B: Initialize file field to an empty ARRAY
         defaultValues: { product_name: '', product_line: '', description: '', capacity: '', gmdc_pct: 0.00, product_pictures: [] }, 
         placeholder: { product_name: 'Sensor A1', product_line: 'Engine Line X', capacity: 'Unlimited/on demand...', gmdc_pct: 35.50 },
+    },
+    users: {
+        name: 'Users',
+        apiPath: '/api/users',
+        filterableFields: ['email', 'displayName', 'user_role'],
+        fields: ['id', 'email', 'displayName', 'user_role', ...EXCLUDED_INTERNAL_COLUMNS],
+        compactFields: ['displayName', 'email', 'user_role'],
+        requiredFields: ['email', 'password', 'displayName'],
+        defaultValues: { email: '', displayName: '', user_role: 'user' },
+        placeholder: { email: 'name.lastname@avocarbon.com', displayName: 'Firstname Lastname' },
     },
 };
 
@@ -478,9 +548,44 @@ const DetailModal = ({ isOpen, onClose, item, activeCollection, allProductLines,
 const LoginScreen = ({ setAuthToken, setUserData, setIsLoading, isLoading }) => {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
-    const [displayName, setDisplayName] = useState('');
+    const [displayNameInput, setDisplayNameInput] = useState('');
+    const [derivedDisplayName, setDerivedDisplayName] = useState(''); 
     const [isSigningUp, setIsSigningUp] = useState(false);
     const [error, setError] = useState(null);
+    useEffect(() => {
+        if (isSigningUp && email) {
+            // Regex to extract 'name.lastname' from 'name.lastname@avocarbon.com'
+            const match = email.match(/^([^.@]+)(?:\.([^@]+))?@/);
+            
+            let name = '';
+            if (match) {
+                // Capitalize the first part (name) and the second part (lastname)
+                const part1 = match[1] || '';
+                const part2 = match[2] || '';
+
+                const formatPart = (part) => part 
+                    ? part.charAt(0).toUpperCase() + part.slice(1).toLowerCase() 
+                    : '';
+                
+                name = [formatPart(part1), formatPart(part2)].filter(Boolean).join(' ');
+            }
+
+            // Fallback if regex fails or email is incomplete
+            if (name.trim() === '') {
+                // If it can't derive a name, use the email prefix
+                name = email.split('@')[0].replace(/[^a-zA-Z]/g, ' ').trim();
+            }
+            
+            setDerivedDisplayName(name);
+        } else {
+            setDerivedDisplayName('');
+        }
+    }, [email, isSigningUp]);
+    
+    // Determine which display name to use in the form: the derived one, or the manual override if the user edited it.
+    const finalDisplayName = isSigningUp && derivedDisplayName && displayNameInput === '' 
+        ? derivedDisplayName 
+        : displayNameInput;
 
     const handleAuth = async (endpoint, payload) => {
         // FIX: setIsLoading is now correctly defined via props
@@ -519,7 +624,8 @@ const LoginScreen = ({ setAuthToken, setUserData, setIsLoading, isLoading }) => 
 
     const handleSignup = (e) => {
         e.preventDefault();
-        handleAuth('signup', { email, password, displayName });
+        // CRITICAL: Use the final (derived or overridden) display name
+        handleAuth('signup', { email, password, displayName: finalDisplayName }); 
     };
 
     const handleLogin = (e) => {
@@ -532,7 +638,7 @@ const LoginScreen = ({ setAuthToken, setUserData, setIsLoading, isLoading }) => 
             <div className="w-full max-w-md bg-white rounded-xl shadow-2xl p-8 space-y-6">
                 <h1 className="text-3xl font-bold text-center text-indigo-700 flex items-center justify-center">
                     <Database className="w-8 h-8 mr-2 text-indigo-500" />
-                    {isSigningUp ? 'Create Account' : 'Product and Productline Data'}
+                    {isSigningUp ? 'Create Account' : 'RFQ Data'}
                 </h1>
                 
                 {error && (
@@ -547,22 +653,37 @@ const LoginScreen = ({ setAuthToken, setUserData, setIsLoading, isLoading }) => 
                             <User className="w-5 h-5 text-gray-400 absolute left-3 top-1/2 transform -translate-y-1/2" />
                             <input
                                 type="text"
-                                placeholder="Display Name"
-                                value={displayName}
-                                onChange={(e) => setDisplayName(e.target.value)}
+                                placeholder="Display Name (Auto-Generated)"
+                                // Use finalDisplayName for value
+                                value={finalDisplayName} 
+                                // onChange should only update displayNameInput, allowing user to override the auto-filled value
+                                onChange={(e) => setDisplayNameInput(e.target.value)} 
                                 required={isSigningUp}
-                                className="w-full p-3 pl-10 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
-                                disabled={isLoading}
+                                // Set disabled/readonly and apply grey styling if the derived name is being used
+                                disabled={isLoading || (derivedDisplayName && displayNameInput === '')}
+                                className={`w-full p-3 pl-10 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 ${
+                                    (derivedDisplayName && displayNameInput === '') ? 'bg-gray-200 text-gray-500 cursor-not-allowed' : ''
+                                }`}
                             />
+                            {/* Small note to explain the grey field */}
+                            <p className="text-xs text-gray-500 mt-1 pl-10">
+                                {derivedDisplayName && displayNameInput === '' 
+                                    ? 'Derived from email. Start typing to override.' 
+                                    : 'Please enter your full name.'}
+                            </p>
                         </div>
                     )}
                     <div className="relative">
                         <Mail className="w-5 h-5 text-gray-400 absolute left-3 top-1/2 transform -translate-y-1/2" />
-                            <input
+                        <input
                             type="email"
-                            placeholder="Email"
+                            placeholder="Email (e.g., name.lastname@avocarbon.com)"
                             value={email}
-                            onChange={(e) => setEmail(e.target.value)}
+                            // CRITICAL: When email changes, clear the manual input to allow the derived name to take effect
+                            onChange={(e) => {
+                                setEmail(e.target.value);
+                                setDisplayNameInput(''); 
+                            }}
                             required
                             className="w-full p-3 pl-10 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
                             disabled={isLoading}
@@ -613,6 +734,16 @@ const LoginScreen = ({ setAuthToken, setUserData, setIsLoading, isLoading }) => 
     );
 };
 
+
+// Get initial compact fields for default widths
+const initialColumns = initialCollections.product_lines.compactFields.concat(initialCollections.products.compactFields).filter((v, i, a) => a.indexOf(v) === i);
+// Initialize all tracked columns to a default width (e.g., 200px)
+const initialColumnWidths = initialColumns.reduce((acc, field) => {
+    acc[field] = 200; // Default width
+    return acc;
+}, { 'id': 100, 'Actions': 120 }); // Add ID and Actions column width
+
+
 // --- MAIN APPLICATION COMPONENT ---
 const App = () => {
     const [authToken, setAuthToken] = useState(sessionStorage.getItem('authToken'));
@@ -622,7 +753,7 @@ const App = () => {
     });
     // NEW STATE: Tracks if this is the very first load (used to control initial spinner)
     const [isInitialLoad, setIsInitialLoad] = useState(true);
-
+    const [columnWidths, setColumnWidths] = useState(initialColumnWidths);
     const [items, setItems] = useState([]);
     const [allProductLines, setAllProductLines] = useState([]);
     const [logs, setLogs] = useState([]);
@@ -1460,18 +1591,15 @@ const fetchData = useCallback(async (isUserAction = false) => {
                 </div>
             </div>
             
-            {/* COMPACT TABLE DISPLAY */}
-            <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                    <tr>
-                        {activeCollection.compactFields.map(field => (
-                            <th key={field} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                {field.toUpperCase().replace(/_/g, ' ')}
-                            </th>
-                        ))}
-                        <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Details</th>
-                    </tr>
-                </thead>
+            {/* RESIZABLE TABLE DISPLAY */}
+            <table className="min-w-full divide-y divide-gray-200" style={{ tableLayout: 'fixed' }}> 
+                {/* Use new ResizableTableHeader */}
+                <ResizableTableHeader 
+                    columns={activeCollection.compactFields} 
+                    columnWidths={columnWidths}
+                    setColumnWidths={setColumnWidths}
+                />
+
                 <tbody className="bg-white divide-y divide-gray-200">
                     {isLoading && items.length === 0 ? (
                         <tr>
@@ -1492,13 +1620,19 @@ const fetchData = useCallback(async (isUserAction = false) => {
                                     const type = getFieldType(field);
                                     
                                     return (
-                                        <td key={field} className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 truncate max-w-[150px]">
+                                        <td 
+                                            key={field} 
+                                            // Apply dynamic column width for the cell
+                                            style={{ width: columnWidths[field] || 'auto' }} 
+                                            className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 truncate overflow-hidden"
+                                        >
                                             {field === 'id' ? String(item[field]).substring(0, 8) + '...' 
                                                 : type === 'checkbox' ? (item[field] ? 'Yes' : 'No') 
                                                 : String(item[field] || 'N/A')}
                                         </td>
                                     )})}
-                                <td className="px-4 py-3 whitespace-nowrap text-center text-sm font-medium">
+                                <td className="px-4 py-3 whitespace-nowrap text-center text-sm font-medium w-[120px]">
+                                    {/* Action buttons */}
                                     <button 
                                         onClick={() => openModalForEdit(item)} 
                                         className="text-indigo-600 hover:text-indigo-800 transition p-1 rounded-full hover:bg-indigo-100 disabled:opacity-50" 
