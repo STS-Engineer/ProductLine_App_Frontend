@@ -655,7 +655,7 @@ const LoginScreen = ({ setAuthToken, setUserData, setIsLoading, isLoading }) => 
                         <Mail className="w-5 h-5 text-gray-400 absolute left-3 top-1/2 transform -translate-y-1/2" />
                             <input
                             type="email"
-                            placeholder="Email (e.g., name.lastname@avocarbon.com)"
+                            placeholder="Email"
                             value={email}
                             onChange={(e) => {
                                 setEmail(e.target.value);
