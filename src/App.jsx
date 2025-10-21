@@ -620,7 +620,7 @@ const LoginScreen = ({ setAuthToken, setUserData, setIsLoading, isLoading }) => 
             <div className="w-full max-w-md bg-white rounded-xl shadow-2xl p-8 space-y-6">
                 <h1 className="text-3xl font-bold text-center text-indigo-700 flex items-center justify-center">
                     <Database className="w-8 h-8 mr-2 text-indigo-500" />
-                    {isSigningUp ? 'Create Account' : 'RFQ Data'}
+                    {isSigningUp ? 'Create Account' : 'Products and ProductLines Data'}
                 </h1>
                 
                 {error && (
@@ -1216,7 +1216,7 @@ const App = () => {
                     title="AVOCARBON"
                 />
                 <h1 className="text-2xl font-extrabold text-indigo-400 flex items-center">
-                    RFQ StreamLine
+                    Products and ProductLines StreamLine
                 </h1>
             </div>
             <div className="text-right flex items-center space-x-4 mt-2 sm:mt-0">
@@ -1638,7 +1638,7 @@ const App = () => {
                 </div>
 
                 <p className="text-xs">
-                    © {new Date().getFullYear()} RFQ StreamLine. All rights reserved. | Version 1.2
+                    © {new Date().getFullYear()} Products and ProductLines StreamLine. All rights reserved. | Version 1.2
                 </p>
             </div>
         </footer>
