@@ -76,7 +76,7 @@ const formatTimestamp = (dateString) => {
 };
 
 const getFieldType = (field) => {
-    if (field.includes('history') || field.includes('description') || field.includes('strategy')|| field.includes('capacity') || field.includes('parameters') || field.includes('tooling') || field.includes('advantages') || field.includes('costing_data') || field.includes('definition') || field.includes('environment') || field.includes('locations') || field.includes('center') || field.includes('metiers') || field.includes('strength') || field.includes('weakness') || field.includes('perspectives') || field.includes('customers') || field.includes('prototypes_ppap_and_sop') || field.includes('engineering_and_testing')) return 'textarea';
+    if (field.includes('history') || field.includes('description') || field.includes('strategy')|| field.includes('capacity') || field.includes('parameters') || field.includes('tooling') || field.includes('advantages') || field.includes('costing_data') || field.includes('definition') || field.includes('environment') || field.includes('locations') || field.includes('center') || field.includes('metiers') || field.includes('strength') || field.includes('weakness') || field.includes('perspectives') || field.includes('customers') || field.includes('prototypes_ppap_and_sop') || field.includes('engineering_and_testing') || field.includes('type_of_products')) return 'textarea';
     if (field.includes('gmdc_pct') || field.includes('estimated_price') ) return 'number';
     if (field.includes('prod_if_customer_in_china')) return 'checkbox';
     // File/Image fields now map to the new file handling logic
@@ -160,7 +160,7 @@ const ResizableTableHeader = ({ columns, columnWidths, setColumnWidths, actionCo
 const DetailModal = ({ isOpen, onClose, item, activeCollection, allProductLines, handleUpdate, isLoading, setApiError }) => {
     const [formData, setFormData] = useState(item);
     const [expandedFields, setExpandedFields] = useState({});
-
+    const [isEditing, setIsEditing] = useState(item.id === undefined || item.id === null);   
     useEffect(() => {
         // Reset form data when item changes or modal opens
         setFormData({
@@ -172,6 +172,7 @@ const DetailModal = ({ isOpen, onClose, item, activeCollection, allProductLines,
             product_pictures: Array.isArray(item.product_pictures) ? item.product_pictures : (item.product_pictures ? [item.product_pictures] : []),
         });
         setExpandedFields({});
+        setIsEditing(item.id === undefined || item.id === null);
     }, [item, isOpen]);
 
     if (!isOpen) return null;
@@ -227,7 +228,6 @@ const DetailModal = ({ isOpen, onClose, item, activeCollection, allProductLines,
         const baseClass = "p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 shadow-sm w-full";
         const currentValue = formData[field] || ''; // Can be string (path) or File object
         const isLongText = type === 'textarea';
-        const isExpanded = isLongText && (String(currentValue).length > CHARACTER_EXPANSION_THRESHOLD || expandedFields[field]);
 
         
         if (isProduct && field === 'product_line') {
@@ -253,31 +253,46 @@ const DetailModal = ({ isOpen, onClose, item, activeCollection, allProductLines,
              );
         }
 
-        if (isLongText) {
-             const rowCount = isExpanded ? 6 : 2;
-             const canExpand = String(currentValue).length > CHARACTER_EXPANSION_THRESHOLD;
-             return (
-                 <div className={`relative flex flex-col ${isExpanded ? 'col-span-full' : 'col-span-1'}`}>
-                     <label className="text-xs font-medium text-gray-500 mb-1">{label} {isRequired && '*'}</label>
-                     <textarea
-                         rows={rowCount}
-                         value={currentValue}
-                         onChange={(e) => handleFieldChange(field, e.target.value)}
-                         required={isRequired}
-                         className={baseClass}
-                         disabled={isLoading}
-                     />
-                     {canExpand && (
-                         <button 
-                             type="button"
-                             onClick={() => setExpandedFields(prev => ({ ...prev, [field]: !prev[field] }))}
-                             className="text-indigo-500 text-xs mt-1 self-start hover:text-indigo-700 transition"
-                         >
-                             {isExpanded ? 'Collapse ▲' : 'Expand ▼'}
-                         </button>
-                     )}
-                 </div>
-             );
+    if (isLongText) {
+    const isEditingMode = isEditing; // Use the state variable from the previous fix
+    const isCurrentlyExpanded = expandedFields[field];
+    const rawValue = String(currentValue);
+    const isContentLong = rawValue.length > CHARACTER_EXPANSION_THRESHOLD;
+    
+    // Set rows based on the expanded state. Always be 2 when collapsed.
+    const rowCount = isCurrentlyExpanded ? 6 : 2;
+
+    return (
+        // Always span full width for long text fields
+        <div key={field} className={`relative flex flex-col col-span-full`}> 
+            <label className="text-xs font-medium text-gray-500 mb-1">{label} {isRequired && '*'}</label>
+            
+            <textarea
+                rows={rowCount} // Controls the visible height
+                value={rawValue}
+                onChange={(e) => handleFieldChange(field, e.target.value)}
+                required={isRequired}
+                className={`${baseClass} transition-all duration-200 
+                  ${!isEditingMode ? 'bg-gray-50 text-gray-700' : ''} 
+                  ${isCurrentlyExpanded ? 'overflow-y-auto' : 'overflow-hidden'}` // Force overflow-hidden when collapsed
+                }
+                disabled={isLoading || !isEditingMode} // Use the correct disabled state
+            />
+            
+            {/* Show Expand button only if content is long */}
+            {isContentLong && (
+                <button 
+                    type="button"
+                    // Toggle the field's expansion state
+                    onClick={() => setExpandedFields(prev => ({ ...prev, [field]: !prev[field] }))}
+                    className="text-indigo-500 text-xs mt-1 self-start hover:text-indigo-700 transition"
+                    disabled={isLoading}
+                >
+                    {isCurrentlyExpanded ? 'Collapse ▲' : 'Expand ▼'}
+                </button>
+            )}
+        </div>
+    );
         }
         
         if (type === 'file_image' || type === 'file_attachment') {
@@ -472,7 +487,7 @@ const DetailModal = ({ isOpen, onClose, item, activeCollection, allProductLines,
                     onChange={(e) => handleFieldChange(field, e.target.value)}
                     required={isRequired}
                     className={baseClass}
-                    disabled={isLoading}
+                    disabled={isLoading || !isEditing}
                 />
             </div>
         );
@@ -488,9 +503,27 @@ const DetailModal = ({ isOpen, onClose, item, activeCollection, allProductLines,
                         <Eye className="w-5 h-5 mr-2 text-indigo-500" />
                         Edit/View: {item.id ? activeCollection.name.slice(0, -1) : ''} (ID: {item.id ? String(item.id).substring(0, 8) : 'N/A'})
                     </h2>
-                    <button onClick={onClose} className="p-2 text-gray-500 hover:text-gray-900 rounded-full hover:bg-gray-100 transition">
-                        <X className="w-6 h-6" />
-                    </button>
+                    {/* NEW: MODIFY / CLOSE BUTTON GROUP */}
+                    <div className="flex space-x-3 items-center">
+                        
+                        {/* 1. Modify Button (Visible when NOT editing AND item is existing) */}
+                        {!isEditing && item.id && (
+                            <button 
+                                type="button" 
+                                onClick={() => setIsEditing(true)}
+                                className="px-4 py-2 text-sm font-semibold rounded-lg shadow-md transition duration-150 flex items-center bg-yellow-600 hover:bg-yellow-700 text-white"
+                                disabled={isLoading}
+                            >
+                                <FileText className="w-5 h-5 mr-2" />
+                                Modify
+                            </button>
+                        )}
+                        
+                        {/* 2. Close Button */}
+                        <button onClick={onClose} className="p-2 text-gray-500 hover:text-gray-900 rounded-full hover:bg-gray-100 transition">
+                            <X className="w-6 h-6" />
+                        </button>
+                    </div>
                 </div>
                 
                 <form onSubmit={handleSubmit} className="p-6 space-y-6">
@@ -517,14 +550,17 @@ const DetailModal = ({ isOpen, onClose, item, activeCollection, allProductLines,
                         >
                             Cancel
                         </button>
-                        <button
-                            type="submit"
-                            className="px-6 py-2 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 transition disabled:opacity-50 flex items-center justify-center"
-                            disabled={isLoading}
-                        >
-                            {isLoading ? <Loader className="w-5 h-5 animate-spin mr-2" /> : <Save className="w-5 h-5 mr-2" />}
-                            Save Changes
-                        </button>
+                       {/* SHOW SAVE BUTTON ONLY WHEN EDITING */}
+                        {isEditing && (
+                            <button
+                                type="submit"
+                                className="px-6 py-2 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 transition disabled:opacity-50 flex items-center justify-center"
+                                disabled={isLoading}
+                            >
+                                {isLoading ? <Loader className="w-5 h-5 animate-spin mr-2" /> : <Save className="w-5 h-5 mr-2" />}
+                                Save Changes
+                            </button>
+                        )}
                     </div>
                 </form>
             </div>
@@ -620,7 +656,7 @@ const LoginScreen = ({ setAuthToken, setUserData, setIsLoading, isLoading }) => 
             <div className="w-full max-w-md bg-white rounded-xl shadow-2xl p-8 space-y-6">
                 <h1 className="text-3xl font-bold text-center text-indigo-700 flex items-center justify-center">
                     <Database className="w-8 h-8 mr-2 text-indigo-500" />
-                    {isSigningUp ? 'Create Account' : 'Products and ProductLines Data'}
+                    {isSigningUp ? 'Create Account' : 'RFQ Data'}
                 </h1>
                 
                 {error && (
@@ -1216,7 +1252,7 @@ const App = () => {
                     title="AVOCARBON"
                 />
                 <h1 className="text-2xl font-extrabold text-indigo-400 flex items-center">
-                    Products and ProductLines StreamLine
+                    RFQ StreamLine
                 </h1>
             </div>
             <div className="text-right flex items-center space-x-4 mt-2 sm:mt-0">
@@ -1638,7 +1674,7 @@ const App = () => {
                 </div>
 
                 <p className="text-xs">
-                    © {new Date().getFullYear()} Products and ProductLines StreamLine. All rights reserved. | Version 1.2
+                    © {new Date().getFullYear()} RFQ StreamLine. All rights reserved. | Version 1.2
                 </p>
             </div>
         </footer>
