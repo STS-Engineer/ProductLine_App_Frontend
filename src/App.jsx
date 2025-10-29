@@ -353,7 +353,7 @@ const DetailModal = ({ isOpen, onClose, item, activeCollection, allProductLines,
                                     src="${viewerUrl}" 
                                     style="width: 100%; height: 100%; border: none;" 
                                     title="${fileName} Viewer"
-                                    sandbox="allow-scripts allow-popups"
+                                    sandbox="allow-scripts allow-popups allow-forms"
                                 >
                                 </iframe>
                             </div>
