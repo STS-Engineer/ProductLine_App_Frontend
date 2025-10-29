@@ -324,37 +324,8 @@ const DetailModal = ({ isOpen, onClose, item, activeCollection, allProductLines,
                 let viewerNote = 'If the file doesn\'t display above, your browser may not support direct viewing of this file type.';
                 
                 if (isOfficeFile) {
-                    // Office files require publicly accessible URLs for preview
-                    Swal.fire({
-                        title: `${label}: ${fileName}`,
-                        html: `
-                            <div class="text-left space-y-4">
-                                <p class="text-gray-700">
-                                    <strong>File Type:</strong> ${fileName.split('.').pop().toUpperCase()}
-                                </p>
-                                <p class="text-sm text-gray-600">
-                                    Office file preview requires the backend server to be publicly accessible.
-                                    If preview fails, please download the file instead.
-                                </p>
-                                <div class="flex space-x-3 justify-center pt-4">
-                                    <a href="${rawFileUrl}" 
-                                       download 
-                                       class="inline-flex items-center px-5 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-semibold transition">
-                                        Download File
-                                    </a>
-                                    <button 
-                                       onclick="window.open('https://docs.google.com/gview?url=${encodeURIComponent(rawFileUrl)}&embedded=true', '_blank')"
-                                       class="inline-flex items-center px-5 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 font-semibold transition">
-                                        Try Preview
-                                    </button>
-                                </div>
-                            </div>
-                        `,
-                        width: '600px',
-                        showConfirmButton: false,
-                        showCloseButton: true,
-                    });
-                    return; // Exit early for office files
+                    viewerUrl = `https://docs.google.com/gview?url=${encodeURIComponent(rawFileUrl)}&embedded=true`;
+                    viewerNote = 'Microsoft Office files are being displayed via Google Docs Viewer.';
                 }
 
 
