@@ -318,7 +318,7 @@ const DetailModal = ({ isOpen, onClose, item, activeCollection, allProductLines,
                 
                 const isCommonImage = isImage && (fileName.toLowerCase().match(/\.(jpg|jpeg|png|gif|webp)$/) !== null);
                 
-                const isOfficeFile = fileName.toLowerCase().match(/\.(docx|xlsx|pptx|doc|xls|ppt|pdf)$/) !== null;
+                const isOfficeFile = fileName.toLowerCase().match(/\.(docx|xlsx|pptx|doc|xls|ppt|pdf|csv)$/) !== null;
 
                 let viewerUrl = rawFileUrl;
                 let viewerNote = 'If the file doesn\'t display above, your browser may not support direct viewing of this file type.';
@@ -353,7 +353,7 @@ const DetailModal = ({ isOpen, onClose, item, activeCollection, allProductLines,
                                     src="${viewerUrl}" 
                                     style="width: 100%; height: 100%; border: none;" 
                                     title="${fileName} Viewer"
-                                    sandbox="allow-scripts allow-same-origin allow-popups"
+                                    sandbox="allow-scripts allow-popups"
                                 >
                                 </iframe>
                             </div>
