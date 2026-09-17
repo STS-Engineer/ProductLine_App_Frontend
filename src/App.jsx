@@ -114,7 +114,7 @@ const App = () => {
         const dataCacheNow = dataCacheRef.current;
         let shouldFetchMainData = isUserAction || !dataCacheNow[cachedKey] || (currentTimestamp - dataCacheNow[cachedKey].timestamp) > cacheTTL;
         let shouldFetchProductLines = isUserAction || !dataCacheNow.productLinesList || (currentTimestamp - dataCacheNow.productLinesList.timestamp) > cacheTTL;
-        let shouldFetchLogs = isUserAction;
+        let shouldFetchLogs = isAdmin && isUserAction;
 
         const fetchPromises = [];
 
@@ -151,8 +151,8 @@ const App = () => {
             fetchPromises.push(Promise.resolve(dataCacheNow[cachedKey].data));
         }
 
-        // 2. LOGS Fetch
-        if (shouldFetchLogs || isInitialLoad) {
+        // 2. LOGS Fetch (audit_logs endpoint is admin-only)
+        if (isAdmin && (shouldFetchLogs || isInitialLoad)) {
             fetchPromises.push(
                 safeFetch(`${BASE_API_URL}${LOGS_API_PATH}`,
                     { headers: { Authorization: `Bearer ${authToken}` } },
@@ -200,7 +200,7 @@ const App = () => {
             }
 
             // 3. Update Logs
-            if (shouldFetchLogs || isInitialLoad) {
+            if (isAdmin && (shouldFetchLogs || isInitialLoad)) {
                 setLogs(fetchedLogs);
             }
 
@@ -213,7 +213,7 @@ const App = () => {
                 setIsInitialLoad(false);
             }
         }
-    }, [activeCollectionKey, authToken, userData, isInitialLoad, activeCollection.apiPath, activeCollection.name, handleLogout]);
+    }, [activeCollectionKey, authToken, userData, isInitialLoad, activeCollection.apiPath, activeCollection.name, handleLogout, isAdmin]);
 
 
     // Initial fetch and polling setup

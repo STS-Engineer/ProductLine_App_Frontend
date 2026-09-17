@@ -1,56 +1,23 @@
-import { useState, useEffect } from 'react';
-import { Package, User, Mail, Lock, Loader } from 'lucide-react';
+import { useState } from 'react';
+import { Package, Mail, Lock, Loader } from 'lucide-react';
 import { BASE_API_URL } from '../config/collections';
 import logoAvocarbon from '../assets/logo-avocarbon.png';
 
 const LoginScreen = ({ setAuthToken, setUserData, setIsLoading, isLoading }) => {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
-    const [displayNameInput, setDisplayNameInput] = useState('');
-    const [derivedDisplayName, setDerivedDisplayName] = useState('');
-    const [isSigningUp, setIsSigningUp] = useState(false);
     const [error, setError] = useState(null);
 
-    // NEW LOGIC: Effect to derive displayName from email
-    useEffect(() => {
-        if (isSigningUp && email) {
-            const match = email.match(/^([^.@]+)(?:\.([^@]+))?@/);
-
-            let name = '';
-            if (match) {
-                const part1 = match[1] || '';
-                const part2 = match[2] || '';
-
-                const formatPart = (part) => part
-                    ? part.charAt(0).toUpperCase() + part.slice(1).toLowerCase()
-                    : '';
-
-                name = [formatPart(part1), formatPart(part2)].filter(Boolean).join(' ');
-            }
-
-            if (name.trim() === '' && email.includes('@')) {
-                 name = email.split('@')[0].replace(/[^a-zA-Z]/g, ' ').trim();
-            }
-
-            setDerivedDisplayName(name.trim());
-        } else {
-            setDerivedDisplayName('');
-        }
-    }, [email, isSigningUp]);
-
-    const finalDisplayName = isSigningUp && derivedDisplayName && displayNameInput === ''
-        ? derivedDisplayName
-        : displayNameInput;
-
-    const handleAuth = async (endpoint, payload) => {
+    const handleLogin = async (e) => {
+        e.preventDefault();
         setIsLoading(true);
         setError(null);
 
         try {
-            const response = await fetch(`${BASE_API_URL}/api/auth/${endpoint}`, {
+            const response = await fetch(`${BASE_API_URL}/api/auth/login`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
+                body: JSON.stringify({ email, password })
             });
 
             const data = await response.json();
@@ -68,21 +35,11 @@ const LoginScreen = ({ setAuthToken, setUserData, setIsLoading, isLoading }) => 
             sessionStorage.setItem('userData', JSON.stringify(data.user));
 
         } catch (err) {
-            console.error(`${endpoint} error:`, err);
+            console.error('login error:', err);
             setError(err.message || 'An unknown error occurred.');
         } finally {
             setIsLoading(false);
         }
-    };
-
-    const handleSignup = (e) => {
-        e.preventDefault();
-        handleAuth('signup', { email, password, displayName: finalDisplayName });
-    };
-
-    const handleLogin = (e) => {
-        e.preventDefault();
-        handleAuth('login', { email, password });
     };
 
     return (
@@ -127,10 +84,10 @@ const LoginScreen = ({ setAuthToken, setUserData, setIsLoading, isLoading }) => 
                         </div>
                         <div className="text-center md:text-left">
                             <h1 className="text-2xl font-bold" style={{ color: '#0A4B78' }}>
-                                {isSigningUp ? 'Create Account' : 'Welcome back'}
+                                Welcome back
                             </h1>
                             <p className="text-sm" style={{ color: '#8A8A8A' }}>
-                                {isSigningUp ? 'Sign up to manage products & product lines' : 'Sign in to continue'}
+                                Sign in to continue
                             </p>
                         </div>
                     </div>
@@ -141,39 +98,14 @@ const LoginScreen = ({ setAuthToken, setUserData, setIsLoading, isLoading }) => 
                         </div>
                     )}
 
-                    <form onSubmit={isSigningUp ? handleSignup : handleLogin} className="space-y-4">
-                        {isSigningUp && (
-                            <div className="relative">
-                                <User className="w-5 h-5 absolute left-3 top-1/3 transform -translate-y-1/2" style={{ color: '#8A8A8A' }} />
-                                <input
-                                    type="text"
-                                    placeholder="Display Name (Auto-Generated)"
-                                    value={finalDisplayName}
-                                    onChange={(e) => setDisplayNameInput(e.target.value)}
-                                    required={isSigningUp}
-                                    disabled={isLoading}
-                                    // MODIFICATION: Always apply grey style when signing up
-                                    className="w-full p-3 pl-10 border rounded-lg outline-none transition"
-                                    style={{ borderColor: '#C7C7C7', backgroundColor: '#F4F6F8', color: '#575757' }}
-                                    readOnly={true}
-                                />
-                                <p className="text-xs mt-1 pl-10" style={{ color: '#8A8A8A' }}>
-                                    {derivedDisplayName
-                                        ? `Derived name: ${derivedDisplayName}. Start typing to override.`
-                                        : 'Enter your work email first to auto-generate.'}
-                                </p>
-                            </div>
-                        )}
+                    <form onSubmit={handleLogin} className="space-y-4">
                         <div className="relative">
                             <Mail className="w-5 h-5 absolute left-3 top-1/2 transform -translate-y-1/2" style={{ color: '#8A8A8A' }} />
                                 <input
                                 type="email"
                                 placeholder="Email"
                                 value={email}
-                                onChange={(e) => {
-                                    setEmail(e.target.value);
-                                    setDisplayNameInput('');
-                                }}
+                                onChange={(e) => setEmail(e.target.value)}
                                 required
                                 className="w-full p-3 pl-10 border rounded-lg outline-none transition focus:ring-2 border-[#C7C7C7] text-[#575757] focus:border-[#0071B8] focus:ring-[#0071B8]"
                                 disabled={isLoading}
@@ -198,27 +130,9 @@ const LoginScreen = ({ setAuthToken, setUserData, setIsLoading, isLoading }) => 
                         >
                             {isLoading ? (
                                 <Loader className="w-5 h-5 animate-spin mr-2" />
-                            ) : isSigningUp ? 'Sign Up' : 'Log In'}
+                            ) : 'Log In'}
                         </button>
                     </form>
-
-                    <p className="text-center text-sm" style={{ color: '#575757' }}>
-                        {isSigningUp ? (
-                            <>
-                                Already have an account?{' '}
-                                <button onClick={() => {setIsSigningUp(false); setDisplayNameInput('');}} className="font-medium hover:underline" style={{ color: '#0071B8' }}>
-                                    Log In
-                                </button>
-                            </>
-                        ) : (
-                            <>
-                                Need an account?{' '}
-                                <button onClick={() => {setIsSigningUp(true); setDisplayNameInput('');}} className="font-medium hover:underline" style={{ color: '#0071B8' }}>
-                                    Sign Up
-                                </button>
-                            </>
-                        )}
-                    </p>
                 </div>
             </div>
         </div>
