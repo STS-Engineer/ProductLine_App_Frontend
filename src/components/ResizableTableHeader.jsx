@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 
-const ResizableTableHeader = ({ columns, columnWidths, setColumnWidths, actionColumnTitle = 'Details' }) => {
+const ResizableTableHeader = ({ columns, columnWidths, setColumnWidths, actionColumnTitle = 'Actions' }) => {
     const startResizing = useCallback((e, colKey) => {
         e.preventDefault();
         const startX = e.clientX;

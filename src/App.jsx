@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Plus, Trash2, Clock, Filter, ChevronDown, ChevronRight, Loader, X } from 'lucide-react';
+import { Plus, Trash2, Clock, Filter, ChevronDown, Loader, X, LayoutGrid, List, Image as ImageIcon } from 'lucide-react';
 import Swal from "sweetalert2";
 import { BASE_API_URL, EXCLUDED_INTERNAL_COLUMNS, initialCollections, collectionKeys, LOGS_API_PATH, initialColumnWidths } from './config/collections';
 import { ADMIN_ROLE, CACHE_TTL_MS } from './config/constants';
@@ -9,6 +9,19 @@ import DetailModal from './components/DetailModal';
 import LoginScreen from './components/LoginScreen';
 import Sidebar from './components/Sidebar';
 import CreateItemModal from './components/CreateItemModal';
+
+// product_pictures is stored as a JSON-stringified array (or a bare path, or empty/null) —
+// mirrors the normalization openModalForEdit does, just picking the first entry for a thumbnail.
+const getFirstProductImageUrl = (item) => {
+    let pics = item.product_pictures;
+    if (typeof pics === 'string' && pics.startsWith('[')) {
+        try { pics = JSON.parse(pics); } catch { pics = []; }
+    }
+    if (!Array.isArray(pics)) pics = pics ? [pics] : [];
+    const first = pics[0];
+    if (!first) return null;
+    return first.startsWith('http') ? first : `${BASE_API_URL}/${first}`;
+};
 
 // --- MAIN APPLICATION COMPONENT (UPDATED) ---
 const App = () => {
@@ -52,6 +65,9 @@ const App = () => {
 
     // --- FORM STATE (NEW) ---
     const [isFormVisible, setIsFormVisible] = useState(false);
+
+    // Products-only table/card toggle
+    const [productsViewMode, setProductsViewMode] = useState('card');
 
     // --- FILTER STATE ---
     // Keyed by each filter's config `key`. Value shape depends on its `type`:
@@ -599,16 +615,43 @@ const App = () => {
                     <span className="ml-2 text-sm font-medium text-[#0071B8] p-1 bg-[#EAF4FA] rounded-full">{items.length} items</span>
                 </h2>
 
-                {activeCollectionKey !== 'users' && (
-                    <button
-                        onClick={() => setIsFormVisible(true)}
-                        className="px-4 py-2 text-sm font-semibold rounded-lg shadow-md transition-all duration-150 flex items-center bg-[#ED7300] hover:bg-[#C25F00] hover:-translate-y-0.5 hover:shadow-md text-white"
-                        disabled={isLoading}
-                    >
-                        <Plus className="w-4 h-4 mr-2" />
-                        Add New {activeCollection.name.slice(0, -1)}
-                    </button>
-                )}
+                <div className="flex items-center gap-3">
+                    {activeCollectionKey === 'products' && (
+                        <div className="flex border border-[#C7C7C7] rounded-lg overflow-hidden" role="group" aria-label="Toggle view">
+                            <button
+                                type="button"
+                                onClick={() => setProductsViewMode('table')}
+                                title="Table view"
+                                aria-label="Table view"
+                                aria-pressed={productsViewMode === 'table'}
+                                className={`p-2 transition-colors duration-150 ${productsViewMode === 'table' ? 'bg-[#0071B8] text-white' : 'bg-white text-[#575757] hover:bg-[#F4F6F8]'}`}
+                            >
+                                <List className="w-4 h-4" />
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setProductsViewMode('card')}
+                                title="Card view"
+                                aria-label="Card view"
+                                aria-pressed={productsViewMode === 'card'}
+                                className={`p-2 border-l border-[#C7C7C7] transition-colors duration-150 ${productsViewMode === 'card' ? 'bg-[#0071B8] text-white' : 'bg-white text-[#575757] hover:bg-[#F4F6F8]'}`}
+                            >
+                                <LayoutGrid className="w-4 h-4" />
+                            </button>
+                        </div>
+                    )}
+
+                    {activeCollectionKey !== 'users' && (
+                        <button
+                            onClick={() => setIsFormVisible(true)}
+                            className="px-4 py-2 text-sm font-semibold rounded-lg shadow-md transition-all duration-150 flex items-center bg-[#ED7300] hover:bg-[#C25F00] hover:-translate-y-0.5 hover:shadow-md text-white"
+                            disabled={isLoading}
+                        >
+                            <Plus className="w-4 h-4 mr-2" />
+                            Add New {activeCollection.name.slice(0, -1)}
+                        </button>
+                    )}
+                </div>
             </div>
 
             {apiError && (
@@ -724,74 +767,139 @@ const App = () => {
                 )}
             </div>
 
-            {/* RESIZABLE TABLE DISPLAY */}
-            <table className="min-w-full divide-y divide-[#C7C7C7]" style={{ tableLayout: 'fixed' }}>
-                <ResizableTableHeader
-                    columns={activeCollection.compactFields}
-                    columnWidths={columnWidths}
-                    setColumnWidths={setColumnWidths}
-                />
+            {activeCollectionKey === 'products' && productsViewMode === 'card' ? (
+                /* CARD GRID DISPLAY */
+                isLoading && items.length === 0 ? (
+                    <div className="py-8 text-center text-[#0071B8]">
+                        <Loader className="w-5 h-5 animate-spin inline mr-2" /> Loading data from API...
+                    </div>
+                ) : filteredItems.length === 0 ? (
+                    <div className="py-8 text-center text-[#8A8A8A]">No items found matching filter criteria.</div>
+                ) : (
+                    <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))' }}>
+                        {filteredItems.map(item => {
+                            const imageUrl = getFirstProductImageUrl(item);
+                            return (
+                                <div
+                                    key={item.id}
+                                    onClick={() => !isLoading && openModalForEdit(item)}
+                                    onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && !isLoading) { e.preventDefault(); openModalForEdit(item); } }}
+                                    role="button"
+                                    tabIndex={0}
+                                    title="Click to view details"
+                                    aria-label="View details"
+                                    className="relative bg-white border border-[#C7C7C7] rounded-xl shadow-md hover:shadow-xl hover:-translate-y-0.5 transition-all duration-150 cursor-pointer overflow-hidden flex flex-col"
+                                >
+                                    {/* Fixed-size image slot — every card looks the same regardless of the source image's dimensions */}
+                                    <div className="w-full h-56 bg-[#F4F6F8] flex items-center justify-center overflow-hidden flex-shrink-0">
+                                        {imageUrl ? (
+                                            <img src={imageUrl} alt={item.product_name || 'Product'} className="w-full h-full object-cover" />
+                                        ) : (
+                                            <ImageIcon className="w-12 h-12 text-[#C7C7C7]" aria-hidden="true" />
+                                        )}
+                                    </div>
 
-                <tbody className="bg-white divide-y divide-[#C7C7C7]">
-                    {isLoading && items.length === 0 ? (
-                        <tr>
-                            <td colSpan={activeCollection.compactFields.length + 1} className="px-4 py-4 text-center text-[#0071B8]">
-                                <Loader className="w-5 h-5 animate-spin inline mr-2" /> Loading data from API...
-                            </td>
-                        </tr>
-                    ) : filteredItems.length === 0 ? (
-                        <tr>
-                            <td colSpan={activeCollection.compactFields.length + 1} className="px-4 py-4 text-center text-[#8A8A8A]">
-                                No items found matching filter criteria.
-                            </td>
-                        </tr>
-                    ) : (
-                        filteredItems.map(item => (
-                            <tr
-                                key={item.id}
-                                onClick={() => !isLoading && openModalForEdit(item)}
-                                onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && !isLoading) { e.preventDefault(); openModalForEdit(item); } }}
-                                role="button"
-                                tabIndex={0}
-                                title="Click to view details"
-                                aria-label="View details"
-                                className="hover:bg-[#EAF4FA] transition-colors duration-150 cursor-pointer"
-                            >
-                                {activeCollection.compactFields.map(field => {
-                                    const type = getFieldType(field);
-
-                                    return (
-                                        <td
-                                            key={field}
-                                            // Apply dynamic width style to the cell
-                                            style={{ width: columnWidths[field] || 'auto' }}
-                                            className="px-4 py-3 whitespace-nowrap text-sm text-[#575757] truncate overflow-hidden"
-                                        >
-                                            {field === 'id' ? String(item[field]).substring(0, 8) + '...'
-                                                : type === 'checkbox' ? (item[field] ? 'Yes' : 'No')
-                                                : type === 'textarea' ? (stripHtml(item[field]) || 'N/A')
-                                                : String(item[field] || 'N/A')}
-                                        </td>
-                                    )})}
-                                <td style={{ width: 80 }} className="px-4 py-3 whitespace-nowrap text-center text-sm font-medium">
-                                    <ChevronRight className="w-5 h-5 text-[#8A8A8A] inline-block" aria-hidden="true" />
-                                    {isAdmin && activeCollectionKey !== 'users' && (
+                                    {isAdmin && (
                                         <button
                                             onClick={(e) => { e.stopPropagation(); handleDelete(item.id); }}
-                                            className="text-[#C62828] hover:text-[#a02020] transition p-1 rounded-full hover:bg-[#FDECEC] disabled:opacity-50 ml-2"
+                                            className="absolute top-2 right-2 p-1.5 rounded-full bg-white/90 text-[#C62828] hover:bg-[#FDECEC] disabled:opacity-50 shadow"
                                             disabled={isLoading}
                                             title="Delete Record"
                                             aria-label="Delete Record"
                                         >
-                                            <Trash2 className="w-5 h-5" />
+                                            <Trash2 className="w-4 h-4" />
                                         </button>
                                     )}
+
+                                    <div className="p-4 flex flex-col flex-1">
+                                        <h3 className="text-base font-bold text-[#333333] truncate">{item.product_name || 'N/A'}</h3>
+                                        <p className="text-xs text-[#8A8A8A] mb-2">ID: {String(item.id).substring(0, 8)}...</p>
+                                        {item.product_line && (
+                                            <span className="self-start text-xs font-medium text-[#0071B8] bg-[#EAF4FA] px-2 py-0.5 rounded-full mb-2">
+                                                {item.product_line}
+                                            </span>
+                                        )}
+                                        <p
+                                            className="text-sm text-[#575757]"
+                                            style={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
+                                        >
+                                            {stripHtml(item.description) || 'No description available.'}
+                                        </p>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                )
+            ) : (
+                /* RESIZABLE TABLE DISPLAY */
+                <table className="min-w-full divide-y divide-[#C7C7C7]" style={{ tableLayout: 'fixed' }}>
+                    <ResizableTableHeader
+                        columns={activeCollection.compactFields}
+                        columnWidths={columnWidths}
+                        setColumnWidths={setColumnWidths}
+                    />
+
+                    <tbody className="bg-white divide-y divide-[#C7C7C7]">
+                        {isLoading && items.length === 0 ? (
+                            <tr>
+                                <td colSpan={activeCollection.compactFields.length + 1} className="px-4 py-4 text-center text-[#0071B8]">
+                                    <Loader className="w-5 h-5 animate-spin inline mr-2" /> Loading data from API...
                                 </td>
                             </tr>
-                        ))
-                    )}
-                </tbody>
-            </table>
+                        ) : filteredItems.length === 0 ? (
+                            <tr>
+                                <td colSpan={activeCollection.compactFields.length + 1} className="px-4 py-4 text-center text-[#8A8A8A]">
+                                    No items found matching filter criteria.
+                                </td>
+                            </tr>
+                        ) : (
+                            filteredItems.map(item => (
+                                <tr
+                                    key={item.id}
+                                    onClick={() => !isLoading && openModalForEdit(item)}
+                                    onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && !isLoading) { e.preventDefault(); openModalForEdit(item); } }}
+                                    role="button"
+                                    tabIndex={0}
+                                    title="Click to view details"
+                                    aria-label="View details"
+                                    className="hover:bg-[#EAF4FA] transition-colors duration-150 cursor-pointer"
+                                >
+                                    {activeCollection.compactFields.map(field => {
+                                        const type = getFieldType(field);
+
+                                        return (
+                                            <td
+                                                key={field}
+                                                // Apply dynamic width style to the cell
+                                                style={{ width: columnWidths[field] || 'auto' }}
+                                                className="px-4 py-3 whitespace-nowrap text-sm text-[#575757] truncate overflow-hidden"
+                                            >
+                                                {field === 'id' ? String(item[field]).substring(0, 8) + '...'
+                                                    : type === 'checkbox' ? (item[field] ? 'Yes' : 'No')
+                                                    : type === 'textarea' ? (stripHtml(item[field]) || 'N/A')
+                                                    : String(item[field] || 'N/A')}
+                                            </td>
+                                        )})}
+                                    <td style={{ width: 80 }} className="px-4 py-3 whitespace-nowrap text-center text-sm font-medium">
+                                        {isAdmin && activeCollectionKey !== 'users' && (
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); handleDelete(item.id); }}
+                                                className="text-[#C62828] hover:text-[#a02020] transition p-1 rounded-full hover:bg-[#FDECEC] disabled:opacity-50"
+                                                disabled={isLoading}
+                                                title="Delete Record"
+                                                aria-label="Delete Record"
+                                            >
+                                                <Trash2 className="w-5 h-5" />
+                                            </button>
+                                        )}
+                                    </td>
+                                </tr>
+                            ))
+                        )}
+                    </tbody>
+                </table>
+            )}
         </div>
     );
 
